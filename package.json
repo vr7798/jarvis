@@ -1,0 +1,22 @@
+{
+  "name": "jarvis-web",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "api",
+    "front"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "concurrently -k -n API,FRONT -c cyan,green \"npm run dev --workspace api\" \"npm run dev --workspace front\"",
+    "build": "npm run build --workspace front",
+    "start": "npm start --workspace api",
+    "test": "npm test --workspace api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
