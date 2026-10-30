@@ -61,6 +61,7 @@ test('initialization is ordered, authenticated, deduplicated and uses a shell-fr
   assert.deepEqual(calls.map(c => c.method), ['initialize', 'initialized', 'account/login/start']);
   assert.deepEqual(calls[2].params, { type: 'apiKey', apiKey: 'test-api-key' });
   assert.equal(children[0].launch.options.shell, false);
+  assert.deepEqual(children[0].launch.args, ['-c', 'features.fast_mode=true', 'app-server']);
   assert.equal(children[0].launch.options.env.SESSION_SECRET, undefined);
   assert.equal(children[0].launch.options.env.OPENAI_API_KEY, undefined);
   assert.equal(children[0].launch.options.env.CODEX_HOME, transport.options.home);

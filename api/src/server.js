@@ -5,7 +5,7 @@ try {
   const config = loadConfig();
   const runtime = createApp(config);
   const server = runtime.app.listen(config.port, config.host, () => {
-    console.log(`Jarvis API: http://${config.host}:${config.port} · modo ${config.mode}`);
+    console.log(`Luck API: http://${config.host}:${config.port} · modo ${config.mode}`);
     console.log(`Abra ${config.origin} · workspace: ${config.workspace}`);
   });
   server.on('error', err => { console.error('Não foi possível abrir a porta:', err.message); process.exitCode = 1; runtime.close(); });
@@ -23,6 +23,6 @@ try {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 } catch (err) {
-  console.error('Jarvis:', err.message);
+  console.error('Luck:', err.message);
   process.exitCode = 1;
 }

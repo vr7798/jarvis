@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -24,11 +24,15 @@ class FakeSshTransport extends EventEmitter {
   threads = 0;
   turns = 0;
   failStart = false;
+  configured = [];
+  expectedFingerprint = null;
   configure(value) {
+    this.configured.push({ ...value });
     const { host, port, username, fingerprint, workspace } = value;
     this.endpoint = { host, port, username, fingerprint, workspace };
   }
   async start() {
+    if (this.expectedFingerprint && this.endpoint?.fingerprint !== this.expectedFingerprint) throw new Error('A impressão digital SSH não coincide.');
     if (this.failStart) throw new Error(`Authentication failed: ${sshPassword}`);
     this.ready = true;
   }
@@ -54,8 +58,10 @@ async function eventually(predicate, timeout = 2500) {
   }
 }
 
-async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'jarvis-connection-'));
+const roots = new Map();
+async function fixture(t, { directory } = {}) {
+  const root = directory || await mkdtemp(path.join(os.tmpdir(), 'jarvis-connection-'));
+  roots.set(root, (roots.get(root) || 0) + 1);
   const transport = new FakeSshTransport();
   const probes = [];
   const config = {
@@ -68,13 +74,20 @@ async function fixture(t) {
   const server = runtime.app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    await runtime.close();
+    const completed = new Promise(resolve => server.close(resolve));
+    server.closeAllConnections();
+    await completed;
+  };
   t.after(async () => {
-    try { await runtime.close(); }
+    try { await close(); }
     finally {
-      const closed = new Promise(resolve => server.close(resolve));
-      server.closeAllConnections();
-      await closed;
-      await rm(root, { recursive: true, force: true });
+      roots.set(root, roots.get(root) - 1);
+      if (!roots.get(root)) { roots.delete(root); await rm(root, { recursive: true, force: true }); }
     }
   });
   const request = async (url, { method = 'GET', body, cookie, csrf, origin = config.origin } = {}) => {
@@ -89,7 +102,7 @@ async function fixture(t) {
   const login = async cookie => {
     const result = await post('/api/auth/login', { cookie }, { username: 'owner', password: loginPassword });
     assert.equal(result.status, 200);
-    return { cookie: result.headers.get('set-cookie').split(';')[0], csrf: result.body.csrfToken };
+    return { cookie: result.headers.get('set-cookie').split(';')[0], csrf: result.body.csrfToken, response: result };
   };
   const create = async auth => {
     const result = await post('/api/conversations', auth);
@@ -109,8 +122,22 @@ async function fixture(t) {
     return live;
   };
   const complete = c => transport.emit('notification', { method: 'turn/completed', params: { threadId: c.threadId, turn: { id: c.activeTurnId, status: 'completed' } } });
-  return { ...runtime, root, config, transport, probes, request, post, login, create, connect, send, complete };
+  return { ...runtime, root, config, transport, probes, request, post, login, create, connect, send, complete, close };
 }
+
+test('SSH performance updates and resets require the connection owner; empty default chats remain available offline', async t => {
+  const f = await fixture(t), owner = await f.login(), other = await f.login();
+  const offline = await f.post('/api/conversations', owner, { model: null, reasoningEffort: null, serviceTier: null });
+  assert.equal(offline.status, 201); assert.equal(f.transport.calls.length, 0);
+  const url = `/api/conversations/${offline.body.conversation.id}`;
+  assert.equal((await f.request(url, { method: 'PATCH', ...owner, body: { reasoningEffort: 'ultra' } })).status, 409);
+  await f.connect(owner);
+  for (const body of [{ reasoningEffort: 'ultra' }, { serviceTier: 'priority' }, { reasoningEffort: null, serviceTier: null }]) {
+    assert.equal((await f.request(url, { method: 'PATCH', ...other, body })).status, 409);
+    assert.equal((await f.post('/api/conversations', other, { ...body, serviceTier: body.serviceTier ?? 'priority' })).status, 409);
+  }
+  assert.equal(f.transport.calls.length, 0);
+});
 
 test('SSH probing and connection require a valid login, origin and CSRF; disconnected chat cannot run', async t => {
   const f = await fixture(t);
@@ -227,4 +254,84 @@ test('expiry releases SSH and password never reaches status, stored history or e
   assert.equal(error.status, 502);
   assert.ok(!JSON.stringify(error.body).includes(sshPassword));
   assert.equal(f.connection.owner, null);
+});
+
+test('remembered SSH reconnects after authenticated login and restart without exposing credentials', async t => {
+  const f=await fixture(t);const auth=await f.login();
+  assert.equal((await f.request('/api/connection/saved',auth)).body.profile,null);
+  await f.connect(auth,{remember:true});
+  const saved=await f.request('/api/connection/saved',auth);assert.equal(saved.status,200);assert.equal(saved.body.profile.host,target.host);assert.equal(saved.body.profile.password,undefined);
+  const encrypted=await readFile(f.connection.vault.file,'utf8');assert.ok(!encrypted.includes(sshPassword));assert.ok(!encrypted.includes(target.host));
+  assert.equal((await f.post('/api/auth/logout',auth)).status,200);assert.equal(f.transport.ready,false);
+  const again=await f.login();assert.equal(again.response.status,200);
+  await eventually(async()=> (await f.request('/api/status',again)).body.connected);
+  assert.equal(f.transport.configured.at(-1).password,sshPassword);assert.equal(f.transport.configured.at(-1).fingerprint,fingerprint);
+  const status=(await f.request('/api/status',again)).body;assert.equal(status.savedConnection.host,target.host);assert.ok(!JSON.stringify(status).includes(sshPassword));assert.ok(!JSON.stringify(again.response.body).includes(sshPassword));
+  const count=f.transport.configured.length;
+  assert.equal((await f.post('/api/connection/reconnect',again)).status,200);assert.equal(f.transport.configured.length,count);
+  await f.close();
+  const restarted=await fixture(t,{directory:f.root});const fresh=await restarted.login();
+  await eventually(async()=> (await restarted.request('/api/status',fresh)).body.connected);
+  assert.equal(restarted.transport.configured[0].password,sshPassword);assert.equal(restarted.probes.length,0);
+});
+
+test('saved/reconnect/forget routes require auth and CSRF; auto reconnect never steals another session', async t => {
+  const f=await fixture(t);
+  assert.equal((await f.request('/api/connection/saved')).status,401);assert.equal((await f.post('/api/connection/reconnect',{})).status,401);
+  const owner=await f.login();await f.connect(owner,{remember:true});
+  const other=await f.login();await eventually(()=>other.response.body.status.ownedByAnotherSession);
+  assert.equal(f.transport.configured.length,1);assert.equal((await f.request('/api/status',owner)).body.connected,true);
+  assert.equal((await f.post('/api/connection/reconnect',other)).status,409);
+  assert.equal((await f.post('/api/connection/reconnect',{cookie:owner.cookie})).status,403);
+  assert.equal((await f.request('/api/connection/saved',{method:'DELETE',cookie:owner.cookie})).status,403);
+  assert.equal((await f.request('/api/connection/saved',{method:'DELETE',...owner})).status,200);
+  assert.equal(f.transport.ready,true);assert.equal((await f.request('/api/connection/saved',owner)).body.profile,null);
+  await f.post('/api/auth/logout',owner);const afterForget=await f.login();
+  assert.equal((await f.request('/api/status',afterForget)).body.connected,false);assert.equal((await f.post('/api/connection/reconnect',afterForget)).status,404);
+});
+
+test('failed SSH or host key change cannot save credentials and login remains successful on restore failure', async t => {
+  const f=await fixture(t);const auth=await f.login();
+  f.transport.failStart=true;
+  assert.equal((await f.post('/api/connection/connect',auth,{...target,remember:true})).status,502);
+  assert.equal((await f.request('/api/connection/saved',auth)).body.profile,null);
+  f.transport.failStart=false;await f.connect(auth,{remember:true});await f.post('/api/auth/logout',auth);
+  f.transport.expectedFingerprint='SHA256:'+'b'.repeat(43);
+  const next=await f.login();assert.equal(next.response.status,200);
+  const status=await eventually(async()=>{const s=(await f.request('/api/status',next)).body;return s.autoReconnectError?s:null;});
+  assert.equal(status.connected,false);assert.ok(!JSON.stringify(status).includes(sshPassword));assert.equal(f.transport.configured.at(-1).fingerprint,fingerprint);assert.equal(f.probes.length,0);
+  assert.equal((await f.request('/api/auth/me',next)).status,200);
+  assert.equal((await f.request('/api/connection/saved',next)).body.profile.fingerprint,fingerprint);
+});
+
+test('corrupt vault is recoverable; failed save leaves a successful connection and original saved profile', async t => {
+  const f=await fixture(t);const auth=await f.login();await f.connect(auth,{remember:true});
+  const original=await readFile(f.connection.vault.file,'utf8');await f.post('/api/connection/disconnect',auth);
+  const realSave=f.connection.vault.save.bind(f.connection.vault);f.connection.vault.save=()=>{throw Error('save error '+sshPassword);};
+  const connected=await f.connect(auth,{remember:true,host:'another-vps.example.test'});assert.equal(connected.body.status.connected,true);assert.match(connected.body.status.credentialSaveError,/salvar/);assert.ok(!JSON.stringify(connected.body).includes(sshPassword));assert.equal(await readFile(f.connection.vault.file,'utf8'),original);
+  f.connection.vault.save=realSave;
+  await f.post('/api/auth/logout',auth);await writeFile(f.connection.vault.file,'corrupt encrypted file');
+  const again=await f.login();assert.equal(again.response.status,200);
+  const saved=await f.request('/api/connection/saved',again);assert.equal(saved.body.profile,null);assert.match(saved.body.error,/perfil salvo/);
+  const status=(await f.request('/api/status',again)).body;assert.equal(status.connected,false);assert.match(status.autoReconnectError,/perfil salvo/);
+  assert.equal((await f.request('/api/connection/saved',{method:'DELETE',...again})).status,200);assert.equal((await f.request('/api/connection/saved',again)).body.error,null);
+});
+
+test('logout cancels an automatic restore; a late old handshake cannot close the next login connection', async t => {
+  const f=await fixture(t);const first=await f.login();await f.connect(first,{remember:true});await f.post('/api/auth/logout',first);
+  const originalStart=f.transport.start.bind(f.transport);
+  let rejectOld;
+  f.transport.start=()=>new Promise((resolve,reject)=>{rejectOld=reject;});
+  const interrupted=await f.login();await eventually(()=>Boolean(rejectOld));
+  assert.equal((await f.request('/api/status',interrupted)).body.reconnecting,true);
+  assert.equal((await f.post('/api/auth/logout',interrupted)).status,200);
+  assert.equal(f.connection.owner,null);assert.equal(f.connection.connecting,false);
+  f.transport.start=originalStart;
+  const next=await f.login();await eventually(async()=> (await f.request('/api/status',next)).body.connected);
+  const owner=f.connection.owner,closes=f.transport.closes;
+  rejectOld(new Error('Cancelled old handshake '+sshPassword));
+  await delay(30);
+  assert.equal(f.connection.owner,owner);assert.equal(f.transport.ready,true);assert.equal(f.transport.closes,closes);
+  assert.equal((await f.request('/api/status',next)).body.autoReconnectError,null);
+  assert.equal(f.connection.restoreErrors.size,0);
 });

@@ -1,4 +1,35 @@
-# Jarvis — seu chat privado para o Codex da VPS
+<div align="center">
+  <img src="front/public/luck-shepherd.svg" alt="Logo Luck" width="112" />
+  <h1>Jarvis · Luck Admin</h1>
+  <p>Seu espaço de trabalho para conversar, planejar e construir com o Codex na VPS.</p>
+  <p><strong>React 19</strong> · <strong>Node.js</strong> · <strong>SSH</strong> · <strong>Interface responsiva</strong></p>
+  <p><a href="#recursos">Recursos</a> · <a href="#1-instalar-o-projeto">Instalação</a> · <a href="#comandos-e-diagnóstico">Comandos</a> · <a href="#histórico-de-atualizações">Atualizações</a></p>
+</div>
+
+---
+
+O projeto mantém o nome **Jarvis** no repositório e nos serviços; a interface atual se apresenta como **Luck Admin v5**.
+
+## Recursos
+
+| Recurso | O que você encontra |
+| --- | --- |
+| Chat e histórico | Respostas em Markdown, busca, renomeação, exportação e exclusão de conversas. |
+| Modelos e desempenho | Seleção por conversa de modelo, raciocínio e velocidade, conforme o catálogo da conexão. |
+| Anexos e entregas | Upload de documentos e imagens, prévias e downloads autenticados. |
+| Workspace e terminal | Navegação de arquivos e terminal SSH integrado. |
+| Conexão lembrada | Reconexão após login com credenciais protegidas em cofre criptografado. |
+| Permissões | Somente leitura, edição no workspace e acesso total quando habilitado pelo administrador. |
+| Interface e voz | Tema claro/escuro, layout para celular, ditado e leitura de respostas conforme o navegador. |
+
+## Histórico de atualizações
+
+- [Luck v5 — modelos, raciocínio, velocidade e exclusão de conversas](ATUALIZACAO-LUCK-V5.md)
+- [Luck v4 — reconexão, cofre de credenciais e imagens](ATUALIZACAO-LUCK-V4.md)
+- [Luck v3 — comandos, anexos, arquivos e terminal](ATUALIZACAO-LUCK-V3.md)
+- [Interface — Markdown, temas, histórico e voz](ATUALIZACAO-INTERFACE.md)
+
+## Como funciona
 
 React no navegador, API Node.js e conexão SSH com o Codex instalado na sua VPS. Depois do login no Jarvis, você informa o servidor, o usuário SSH, a senha e a pasta de trabalho. O painel mostra mensagens, comandos, alterações de arquivos e pedidos de aprovação numa interface de chat.
 
@@ -6,19 +37,17 @@ O caminho é **navegador → API do Jarvis → SSH → Codex na VPS**. Quem abre
 
 A [documentação oficial da OpenAI sobre conexões remotas](https://learn.chatgpt.com/docs/remote-connections) descreve a execução do Codex App Server por SSH no servidor remoto. Este projeto é um cliente pessoal para acessar sua própria máquina. Os limites, modelos e permissões da conta autenticada na VPS continuam valendo: SSH não fornece créditos nem contorna cotas.
 
-## 1. Criar no Windows
+## 1. Instalar o projeto
 
-Instale Node.js 24 LTS (ou versão 22.12 ou superior) e Git for Windows. Abra **Git Bash** na Área de Trabalho, salve `script.sh` ali e execute:
+Instale Node.js 24 LTS (ou versão 22.12 ou superior) e Git. No Windows, use o Git Bash; no Linux ou WSL, use o terminal:
 
 ```bash
-bash script.sh
+git clone https://github.com/vr7798/jarvis.git
 cd jarvis
-npm install
+npm ci
 npm run setup
 npm run dev
 ```
-
-O script cria uma pasta nova e recusa um destino que já existe. Ele não altera PM2, Nginx, firewall ou certificados. Também funciona no WSL; nesse caso, instale Node.js dentro do Linux. O `.sh` não roda diretamente no Prompt de Comando.
 
 O `setup` pede seu usuário e uma senha de pelo menos 12 caracteres, grava o hash e gera um segredo de sessão em `api/.env`. Nenhuma senha padrão acompanha o projeto. Para redefinir o login depois:
 
@@ -83,13 +112,13 @@ for key in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$key"; done
 
 Confira o valor `SHA256:...` correspondente, confirme a impressão digital na tela, informe a senha SSH e clique em **Conectar à VPS**. A conexão verifica a mesma chave antes de enviar a senha. Não confirme uma chave diferente sem descobrir por que mudou.
 
-A senha é usada apenas na memória durante a conexão: não vai para `.env`, JSON de histórico ou armazenamento do navegador. Sair do Jarvis, expirar a sessão ou reiniciar a API fecha a conexão; para conectar novamente, informe a senha outra vez. Não exponha o Codex App Server em uma porta pública: sua comunicação passa pelo canal SSH criptografado.
+A opção **Lembrar esta VPS** salva as credenciais no servidor em um cofre AES-256-GCM, separado do histórico, e permite tentar reconectar após o próximo login. Sem essa opção, a senha é usada apenas na memória durante a conexão. Ela não vai para `.env`, histórico ou armazenamento do navegador. Sair do painel, expirar a sessão ou reiniciar a API fecha a conexão; sem um perfil salvo, informe a senha novamente. Use **Esquecer a VPS** para remover o perfil persistido. Não exponha o Codex App Server em uma porta pública: sua comunicação passa pelo canal SSH criptografado.
 
 Depois de conectar, crie uma **nova conversa** e teste:
 
 > Crie teste-jarvis.txt na pasta de trabalho com o conteúdo “Jarvis conectado por SSH”. Depois leia o arquivo e confirme o conteúdo.
 
-O arquivo será criado na pasta escolhida **na VPS**. O Codex recebe as permissões do usuário SSH e o sandbox configurado. `workspace-write` permite escrita na pasta de trabalho; `read-only` permite somente leitura. O projeto não altera permissões ou desativa o sandbox automaticamente.
+O arquivo será criado na pasta escolhida **na VPS**. O Codex recebe as permissões do usuário SSH e o sandbox configurado. `workspace-write` permite escrita na pasta de trabalho; `read-only` permite somente leitura. Acesso total exige habilitação explícita com `CODEX_ALLOW_FULL_ACCESS=true` e seleção por conversa. Consulte as [permissões da v4](ATUALIZACAO-LUCK-V4.md).
 
 `CODEX_MODEL` é opcional: vazio usa a seleção padrão do Codex remoto. `CODEX_WORKSPACE` e `CODEX_HOME` são usados no modo local por API; em SSH, a pasta é escolhida na interface e a autenticação permanece na configuração do usuário remoto.
 
@@ -122,29 +151,18 @@ Nesse modo, a chave fica no servidor. Nunca coloque a chave em variáveis `VITE_
 
 ## Atualizar o projeto que você já instalou
 
-Se você baixou `atualizar-ssh.sh`, coloque-o na raiz do projeto atual (ao lado de `package.json`). Pare `npm run dev` com Ctrl+C e, no Git Bash dessa pasta, execute:
+Antes de atualizar, faça um backup privado de `api/.env` e `api/data`. Com as alterações locais revisadas e salvas no Git, na raiz do projeto:
 
 ```bash
-bash atualizar-ssh.sh
-npm install
-npm run dev
+git pull --ff-only
+npm ci
+npm test
+npm run build
 ```
 
-O atualizador cria uma cópia dos arquivos que substitui em `.jarvis-backups`, preserva o histórico e as credenciais e muda apenas `CODEX_MODE=ssh` no `.env`. Essa pasta de backup é privada e fica fora do Git. O atualizador não instala dependências nem reinicia serviços por conta própria.
+Em produção, reinicie o processo com `pm2 restart jarvis --update-env`. Em desenvolvimento, reinicie `npm run dev`. O histórico, os anexos e o perfil criptografado ficam em `api/data`, fora do Git. Preserve também o usuário configurado e `SESSION_SECRET`, usados para abrir o cofre.
 
-Se preferir atualizar manualmente pelo ZIP, siga os passos abaixo.
-
-Não rode o gerador sobre a pasta existente: ele recusa sobrescrever arquivos. Faça uma cópia privada de segurança do projeto, principalmente `api/.env` e `api/data`.
-
-Extraia o novo ZIP em outra pasta. Copie os arquivos de código e configuração do projeto novo para sua pasta atual, incluindo `package.json`, `package-lock.json`, `api/src`, `api/test`, `api/package.json`, `front`, `scripts` e os exemplos de publicação. **Preserve seu `api/.env` e seu `api/data`; não os substitua por arquivos de outra instalação.**
-
-Na raiz da sua pasta atual:
-
-```bash
-npm install
-```
-
-Edite o `.env` existente para `CODEX_MODE=ssh`, reinicie `npm run dev`, faça login e conecte à VPS. Use uma nova conversa para o novo modo/servidor. As conversas anteriores permanecem no histórico, mas não são automaticamente transferidas entre máquinas ou autenticações.
+O arquivo `atualizar-ssh.sh` é um atualizador legado da versão inicial de SSH. Para obter a interface Luck atual, use os fontes deste repositório; executar o script legado pode substituir arquivos por versões antigas.
 
 ## Estrutura e dados
 
@@ -167,7 +185,7 @@ jarvis/
 └── ecosystem.config.cjs   # exemplo de PM2
 ```
 
-Não é necessário MongoDB para este uso individual: o histórico fica em JSON em `api/data/store.json`. Há limites de conversas e mensagens para evitar crescimento indefinido. Sessões de login ficam em memória: reiniciar a API exige novo login e nova conexão SSH, mas preserva o histórico. Reiniciar ou desconectar durante uma tarefa pode interrompê-la; confira o resultado na VPS antes de repetir comandos.
+Não é necessário MongoDB para este uso individual: o histórico fica em JSON em `api/data/store.json`. Há limites de conversas e mensagens para evitar crescimento indefinido. Sessões de login ficam em memória: reiniciar a API exige novo login, mas preserva o histórico. Se houver uma VPS lembrada, o painel tenta restabelecer a conexão SSH após o login. Reiniciar ou desconectar durante uma tarefa pode interrompê-la; confira o resultado na VPS antes de repetir comandos.
 
 ## Enviar para seu GitHub
 
@@ -194,7 +212,7 @@ Execute o painel com um usuário dedicado. Os comandos pressupõem Node.js, Git,
 
 ```bash
 cd /var/www
-git clone URL_DO_SEU_REPOSITORIO jarvis
+git clone https://github.com/vr7798/jarvis.git jarvis
 cd jarvis
 npm ci
 npm run setup

@@ -10,6 +10,8 @@ import { ChatService } from './services/chatService.js';
 import { Events } from './services/events.js';
 import { apiRoutes } from './routes/index.js';
 import { ConnectionService } from './services/connectionService.js';
+import { WorkspaceFiles } from './services/workspaceFiles.js';
+import { AttachmentService } from './services/attachmentService.js';
 
 export function createApp(config, { transport, probe } = {}) {
   const app = express();
@@ -17,6 +19,9 @@ export function createApp(config, { transport, probe } = {}) {
   const events = new Events();
   const chat = new ChatService(config, store, events, transport);
   const connection = new ConnectionService(config, chat, events, { probe });
+  const workspaceFiles = new WorkspaceFiles(config, chat);
+  const attachments = new AttachmentService(config, chat, workspaceFiles);
+  chat.attachments = attachments;
   // Single trusted Nginx hop. HOST stays on loopback in production.
   if (config.production) app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
@@ -38,7 +43,8 @@ export function createApp(config, { transport, probe } = {}) {
   }, 60000);
   pruneSessions.unref();
   app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.use('/api', apiRoutes(config, store, chat, events, connection));
+  const routes = apiRoutes(config, store, chat, events, connection, { attachments, workspaceFiles });
+  app.use('/api', routes);
   const dist = path.resolve(apiRoot, '../front/dist');
   if (fs.existsSync(path.join(dist, 'index.html'))) {
     app.use(express.static(dist, { index: false }));
@@ -48,7 +54,7 @@ export function createApp(config, { transport, probe } = {}) {
     if (res.headersSent) return next(err);
     const status = err.status || 500;
     res.status(status).json({ error: status >= 500 && !err.expose ? 'Falha interna. Confira a configuração e os logs da API.' : err.message });
-    if (status >= 500) console.error('[Jarvis] Falha interna:', err.code || err.name);
+    if (status >= 500) console.error('[Luck] Falha interna:', err.code || err.name);
   });
-  return { app, store, chat, events, connection, async close() { clearInterval(pruneSessions); events.close(); await connection.close(); await chat.close(); } };
+  return { app, store, chat, events, connection, attachments, workspaceFiles, terminal: routes.terminal?.service, async close() { clearInterval(pruneSessions); routes.terminal?.close(); routes.capabilities?.close(); events.close(); await connection.close(); await chat.close(); } };
 }

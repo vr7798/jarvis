@@ -6,5 +6,8 @@ export function connectionController(connection) {
       res.json({ status: await connection.connect(req.sessionID, expiry, req.body) });
     },
     async disconnect(req, res) { await connection.disconnect(req.sessionID); res.json({ ok: true }); },
+    saved(req, res) { res.json(connection.saved()); },
+    async reconnect(req, res) { res.json({ status: await connection.reconnect(req.sessionID, new Date(req.session.cookie.expires).getTime()) }); },
+    forget(req, res) { connection.forget(); res.json({ ok: true }); },
   };
 }

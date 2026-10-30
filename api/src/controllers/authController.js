@@ -17,7 +17,12 @@ export function authController(config, events, connection) {
           events.disconnect(previousSessionId);
           req.session.user = { username: config.username };
           req.session.csrfToken = randomBytes(32).toString('hex');
-          req.session.save(err => err ? next(err) : res.json({ user: req.session.user, csrfToken: req.session.csrfToken }));
+          req.session.save(err => {
+            if (err) return next(err);
+            connection.autoReconnect(req.sessionID, new Date(req.session.cookie.expires).getTime());
+            const status = connection.status(req.sessionID);
+            res.json({ user: req.session.user, csrfToken: req.session.csrfToken, status, connectionError: status.autoReconnectError || null });
+          });
         });
       } catch (err) { next(err); }
     },

@@ -10,3 +10,6 @@ coverage/
 .DS_Store
 Thumbs.db
 .jarvis-backups/
+
+# Builds intermediários de publicação
+front/dist-luck-stage*/

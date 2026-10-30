@@ -94,6 +94,7 @@ test('SSH uses remote authenticated Codex without API login and streams protocol
   assert.deepEqual(commands, [remoteCommand(workspace, 'codex')]);
   assert.match(commands[0], /^exec bash -lc /);
   assert.equal(commands[0].includes('OPENAI_API_KEY'), false);
+  assert.ok(commands[0].includes('features.fast_mode=true'));
   const notification = once(transport, 'notification');
   streams[0].write(JSON.stringify({ method: 'item/agentMessage/delta', params: { delta: 'Resposta remota' } }) + '\n');
   assert.deepEqual((await notification)[0], { method: 'item/agentMessage/delta', params: { delta: 'Resposta remota' } });

@@ -3,7 +3,7 @@ import ssh2 from 'ssh2';
 import path from 'node:path';
 import { CodexTransport } from './codexTransport.js';
 
-const MAX_BUFFER = 8 * 1024 * 1024;
+const MAX_BUFFER = 40 * 1024 * 1024;
 const { Client } = ssh2;
 
 function validateAddress({ host, port = 22 }) {
@@ -21,7 +21,7 @@ export function fingerprintFromHash(hash) {
 export function quotePosix(value) { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
 export function remoteCommand(workspace, bin = 'codex') {
-  const inner = `cd -- ${quotePosix(workspace)} && exec ${quotePosix(bin)} app-server`;
+  const inner = `cd -- ${quotePosix(workspace)} && exec ${quotePosix(bin)} -c features.fast_mode=true app-server`;
   return `exec bash -lc ${quotePosix(inner)}`;
 }
 
@@ -175,7 +175,7 @@ export class SshTransport extends CodexTransport {
         });
         try { connection.connect(configuration); } catch (error) { fail(error); }
       });
-      await this.request('initialize', { clientInfo: { name: 'jarvis_ssh', title: 'Jarvis SSH', version: '2.0.0' } });
+      await this.request('initialize', { clientInfo: { name: 'jarvis_ssh', title: 'Luck SSH', version: '3.0.0' } });
       this.send({ method: 'initialized', params: {} });
       const result = await this.request('account/read', { refreshToken: false });
       if (result?.requiresOpenaiAuth && !result.account) throw new Error('Faça codex login no terminal da VPS com o mesmo usuário SSH e conecte novamente.');

@@ -25,13 +25,18 @@ export class ConversationStore {
     const { threadId, contextKey, ...visible } = c;
     return visible;
   }
-  create() {
+  create(permissions) {
     if (this.conversations.length >= 100) throw Object.assign(new Error('Limite de 100 conversas atingido. Faça backup e arquive o histórico antes de continuar.'), { status: 409 });
     const now = new Date().toISOString();
     const c = { id: randomUUID(), title: 'Nova conversa', createdAt: now, updatedAt: now, messages: [], busy: false, activeTurnId: null, threadId: null };
+    if (permissions) c.permissions = permissions;
     this.conversations.push(c);
     this.flush();
     return c;
+  }
+  remove(c) {
+    this.conversations = this.conversations.filter(item => item.id !== c.id);
+    this.flush();
   }
   addMessage(c, role, text, id = randomUUID()) {
     const m = { id, role, text: String(text).slice(-64000), createdAt: new Date().toISOString() };

@@ -4,27 +4,30 @@ import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const MAX_LINE_BYTES = 8 * 1024 * 1024;
+const MAX_LINE_BYTES = 40 * 1024 * 1024;
 
 // npm installs a .cmd shim on Windows, which cannot be spawned without a shell.
 // Resolve the package entry point instead: arguments and paths remain separate.
 export function codexLaunch(bin = 'codex') {
-  if (/\.(?:mjs|cjs|js)$/i.test(bin)) return { command: process.execPath, args: [bin, 'app-server'] };
-  if (process.platform !== 'win32' && !/\.(?:cmd|bat)$/i.test(bin)) return { command: bin, args: ['app-server'] };
-  if (process.platform === 'win32' && /\.exe$/i.test(bin)) return { command: bin, args: ['app-server'] };
+  // Enable the speed selector for this process without choosing a faster tier
+  // or changing the remote user's persistent configuration.
+  const args = ['-c', 'features.fast_mode=true', 'app-server'];
+  if (/\.(?:mjs|cjs|js)$/i.test(bin)) return { command: process.execPath, args: [bin, ...args] };
+  if (process.platform !== 'win32' && !/\.(?:cmd|bat)$/i.test(bin)) return { command: bin, args };
+  if (process.platform === 'win32' && /\.exe$/i.test(bin)) return { command: bin, args };
   const dirs = path.isAbsolute(bin) || bin.includes('/') || bin.includes('\\')
     ? [path.dirname(path.resolve(bin))]
     : (process.env.PATH || '').split(path.delimiter).filter(Boolean).map(p => p.replace(/^"|"$/g, ''));
   for (const dir of dirs) {
     const entry = path.join(dir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-    if (existsSync(entry)) return { command: process.execPath, args: [entry, 'app-server'] };
+    if (existsSync(entry)) return { command: process.execPath, args: [entry, ...args] };
     const native = path.join(dir, 'codex.exe');
-    if (process.platform === 'win32' && existsSync(native)) return { command: native, args: ['app-server'] };
+    if (process.platform === 'win32' && existsSync(native)) return { command: native, args };
   }
   if (/\.(?:cmd|bat)$/i.test(bin) || bin === 'codex') {
     throw new Error('Codex não encontrado. Instale @openai/codex ou defina CODEX_BIN com o caminho de codex.exe ou bin/codex.js.');
   }
-  return { command: bin, args: ['app-server'] };
+  return { command: bin, args };
 }
 
 function childEnvironment(home) {
@@ -106,7 +109,7 @@ export class CodexTransport extends EventEmitter {
     child.on('error', error => this.failed(child, new Error(this.safeError(`Não foi possível iniciar o Codex: ${error.message}`))));
     child.on('exit', (code, signal) => this.failed(child, new Error(`Codex encerrado (${signal || code || 'saída'}).`)));
     try {
-      await this.request('initialize', { clientInfo: { name: 'jarvis_web', title: 'Jarvis Web', version: '1.0.0' } });
+      await this.request('initialize', { clientInfo: { name: 'jarvis_web', title: 'Luck Web', version: '3.0.0' } });
       this.send({ method: 'initialized', params: {} });
       await this.request('account/login/start', { type: 'apiKey', apiKey: this.options.apiKey });
       if (this.child !== child) throw new Error('Codex foi encerrado durante a inicialização.');
