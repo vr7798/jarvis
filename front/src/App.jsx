@@ -2,9 +2,21 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import MarkdownMessage, { plainText } from './components/MarkdownMessage.jsx';
 import useVoice from './hooks/useVoice.js';
 import SlashMenu from './components/SlashMenu.jsx';
+import { buildCommandCatalog, filterCommands } from './components/commandCatalog.js';
+import Orb from './components/Orb.jsx';
+const VoiceStudio = lazy(() => import('./components/VoiceStudio.jsx'));
+const MediaStudio = lazy(() => import('./components/MediaStudio.jsx'));
+import { downloadText } from './components/downloadText.js';
 import FilesPanel from './components/FilesPanel.jsx';
 import ModelSettings, { effortLabel, speedLabel, selectedModel } from './components/ModelSettings.jsx';
-const TerminalPanel = lazy(() => import('./components/TerminalPanel.jsx'));
+import TerminalLauncher from './components/TerminalLauncher.jsx';
+const loadTerminal = () => import('./components/TerminalPanel.jsx');
+const TerminalPanel = lazy(loadTerminal);
+const prepareTerminal = () => { loadTerminal().catch(() => {}); };
+const loadProjects = () => import('./components/ProjectWorkspace.jsx');
+const ProjectWorkspace = lazy(loadProjects);
+const prepareProjects = () => { loadProjects().catch(() => {}); };
+import './projects-launcher.css';
 import './commands.css';
 
 
@@ -38,6 +50,10 @@ function Icon({ name, size = 20, ...props }) {
     check: <path d="m5 12 4 4L19 6" />,
     eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
     shield: <><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" /><path d="m8 12 3 3 5-6" /></>,
+    image: <><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="8" cy="8" r="1.5" /><path d="m3 17 6-6 4 4 3-3 5 5" /></>,
+    sparkle: <><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 2v4M18 4h4" /></>,
+    history: <><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2" /></>,
+    panel: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16m6-11-3 3 3 3" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.chat}</svg>;
 }
@@ -160,7 +176,7 @@ function SshConnect({ csrf, occupied, onConnected, onUnauthorized, initialTarget
   </section></div>;
 }
 
-const defaultPreferences = { theme: 'dark', fontSize: 'normal', autoRead: false, rate: 1, voiceURI: '', showTools: false };
+const defaultPreferences = { theme: 'dark', fontSize: 'normal', autoRead: false, rate: 1, voiceURI: '', showTools: false, sidebarCollapsed: false };
 function loadPreferences() {
   try { const saved = JSON.parse(localStorage.getItem('jarvis.preferences.v2') || '{}'); return { ...defaultPreferences, ...saved, theme: ['dark', 'light'].includes(saved.theme) ? saved.theme : 'dark' }; }
   catch { return defaultPreferences; }
@@ -211,7 +227,7 @@ function Settings({ preferences, setPreferences, permissions, allowed, conversat
 
 function Message({ message, username, preferences, voice, onCopy, copied, conversationId, workspace }) {
   const isTool = message.role === 'tool';
-  return <article className={`message message-${message.role}`}><div className={`message-avatar ${message.role === 'user' ? 'user-avatar' : ''}`}>{message.role === 'user' ? username.slice(0, 1).toUpperCase() : message.role === 'assistant' ? <img src="/luck-shepherd.svg" alt="" className="assistant-logo" /> : <Icon name={isTool ? 'terminal' : 'shield'} size={18} />}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'user' ? 'Você' : message.role === 'assistant' ? 'Luck' : isTool ? 'Execução' : 'Sistema'}</strong><time>{formatTime(message.createdAt)}</time></div>{isTool ? <details className="tool-details" open={preferences.showTools || undefined}><summary><Icon name="terminal" size={15} /><span>{message.text.split('\n')[0].slice(0, 120) || 'Detalhes da execução'}</span><Icon name="down" size={15} /></summary><pre className="tool-output">{message.text}</pre></details> : message.text ? (['assistant', 'user'].includes(message.role) ? <div className="message-text markdown"><MarkdownMessage conversationId={conversationId} workspace={workspace}>{message.text}</MarkdownMessage></div> : <div className="message-text plain-text">{message.text}</div>) : null}{message.attachments?.length > 0 && <AttachmentList attachments={message.attachments} />}{message.text && <div className="message-actions"><button title="Copiar mensagem" aria-label="Copiar mensagem" onClick={() => onCopy(message.text, message.id)}><Icon name={copied === message.id ? 'check' : 'copy'} size={15} />{copied === message.id && <span>Copiado</span>}</button>{message.role === 'assistant' && voice.supportedSpeech && <button title={voice.speakingId === message.id ? 'Parar leitura' : 'Ouvir resposta'} aria-label={voice.speakingId === message.id ? 'Parar leitura' : 'Ouvir resposta'} className={voice.speakingId === message.id ? 'is-speaking' : ''} onClick={() => voice.speak(message.id, plainText(message.text), preferences)}><Icon name={voice.speakingId === message.id ? 'stop' : 'volume'} size={16} />{voice.speakingId === message.id && <span>Ouvindo…</span>}</button>}</div>}</div></article>;
+  return <article className={`message message-${message.role}`}><div className={`message-avatar ${message.role === 'user' ? 'user-avatar' : ''}`}>{message.role === 'user' ? username.slice(0, 1).toUpperCase() : message.role === 'assistant' ? <img src="/luck-shepherd.svg" alt="" className="assistant-logo" /> : <Icon name={isTool ? 'terminal' : 'shield'} size={18} />}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'user' ? 'Você' : message.role === 'assistant' ? 'Luck' : isTool ? 'Execução' : 'Sistema'}</strong><time>{formatTime(message.createdAt)}</time></div>{isTool ? <details className="tool-details" open={preferences.showTools || undefined}><summary><Icon name="terminal" size={15} /><span>{message.text.split('\n')[0].slice(0, 120) || 'Detalhes da execução'}</span><Icon name="down" size={15} /></summary><pre className="tool-output">{message.text}</pre></details> : message.text ? (['assistant', 'user'].includes(message.role) ? <div className="message-text markdown"><MarkdownMessage conversationId={conversationId} workspace={workspace}>{message.text}</MarkdownMessage></div> : <div className="message-text plain-text">{message.text}</div>) : null}{message.attachments?.length > 0 && <AttachmentList attachments={message.attachments} />}{message.text && <div className="message-actions"><button title="Copiar mensagem" aria-label="Copiar mensagem" onClick={() => onCopy(message.text, message.id)}><Icon name={copied === message.id ? 'check' : 'copy'} size={15} />{copied === message.id && <span>Copiado</span>}</button>{message.role === 'assistant' && <button title="Baixar resposta" aria-label="Baixar resposta" onClick={() => downloadText(message.text, `jarvis-resposta-${message.id.slice(0,8)}.md`, 'text/markdown;charset=utf-8')}><Icon name="download" size={15} /></button>}{message.role === 'assistant' && voice.supportedSpeech && <button title={voice.speakingId === message.id ? 'Parar leitura' : 'Ouvir resposta'} aria-label={voice.speakingId === message.id ? 'Parar leitura' : 'Ouvir resposta'} className={voice.speakingId === message.id ? 'is-speaking' : ''} onClick={() => voice.speak(message.id, plainText(message.text), preferences)}><Icon name={voice.speakingId === message.id ? 'stop' : 'volume'} size={16} />{voice.speakingId === message.id && <span>Ouvindo…</span>}</button>}</div>}</div></article>;
 }
 
 const fileSize = size => size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(0)} KB` : `${(size / 1048576).toFixed(1)} MB`;
@@ -227,12 +243,12 @@ const fallbackCommands = [
   ['new','Nova conversa','Começar uma conversa com o Luck'], ['status','Status','Ver ambiente e permissões atuais'], ['permissions','Permissões','Configurar acesso e aprovações'], ['model','Modelo e desempenho','Escolher modelo, esforço e velocidade do Codex'], ['effort','Esforço de raciocínio','Escolher do modo Baixo ao Ultra, conforme o modelo'], ['fast','Velocidade de resposta','Alterar a velocidade normal ou acelerada'], ['delete','Excluir conversa','Remover esta conversa do histórico após confirmar'], ['skills','Skills','Consultar as habilidades da sua instalação'], ['mcp','Extensões e MCP','Ver as integrações conectadas'], ['compact','Compactar contexto','Resumir o contexto da conversa no Codex'], ['plan','Planejar','Preparar uma instrução de planejamento'], ['review','Revisar código','Preparar uma revisão do projeto'], ['init','Instruções do projeto','Preparar um AGENTS.md para o projeto'], ['terminal','Terminal manual','Abrir o terminal SSH do admin'], ['files','Arquivos','Explorar e baixar arquivos do workspace'], ['attach','Anexar arquivos','Imagens, PDF, ZIP e outros documentos'], ['export','Exportar conversa','Baixar o histórico em Markdown'], ['clear','Limpar rascunho','Remover texto e anexos do rascunho'], ['help','Comandos','Ver os comandos desta versão']
 ].map(([name,label,description]) => ({name,label,description,action:name,source:'Luck'}));
 
-function AdminInfo({ kind, capabilities, loading, status, conversation, permissions, onClose, onSkill, onCommand }) {
+function AdminInfo({ kind, capabilities, commands, loading, status, conversation, permissions, onClose, onSkill, onCommand }) {
   const title = { skills: 'Skills disponíveis', mcp: 'Extensões e MCP', status: 'Status do workspace', help: 'Comandos do Luck' }[kind] || 'Luck';
-  return <Modal title={title} onClose={onClose} wide><div className="admin-info">{loading && <p className="admin-info-loading"><span className="spinner" />Consultando sua instalação…</p>}{kind === 'status' && <dl className="status-grid"><dt>Versão</dt><dd>Luck Admin · v5</dd><dt>Conexão</dt><dd>{status?.connected ? 'Conectado' : 'Aguardando conexão'}</dd><dt>Ambiente</dt><dd>{status?.mode === 'ssh' ? 'Codex via SSH' : status?.mode === 'mock' ? 'Demonstração' : 'Codex local'}</dd><dt>Pasta</dt><dd>{status?.workspace || 'Não conectada'}</dd><dt>Modelo</dt><dd>{conversation?.model || 'Padrão do Codex'}</dd><dt>Esforço</dt><dd>{effortLabel(conversation?.reasoningEffort)}</dd><dt>Velocidade</dt><dd>{speedLabel(conversation?.serviceTier)}</dd><dt>Permissões</dt><dd>{permissionTitle(permissions)}</dd><dt>Aprovação</dt><dd>{permissions.approvalPolicy === 'never' ? 'Sem solicitações de aprovação' : permissions.approvalPolicy === 'untrusted' ? 'Cauteloso' : 'Sob demanda'}</dd></dl>}
+  return <Modal title={title} onClose={onClose} wide><div className="admin-info">{loading && <p className="admin-info-loading"><span className="spinner" />Consultando sua instalação…</p>}{kind === 'status' && <dl className="status-grid"><dt>Versão</dt><dd>Luck Workspace · v8</dd><dt>Conexão</dt><dd>{status?.connected ? 'Conectado' : 'Aguardando conexão'}</dd><dt>Ambiente</dt><dd>{status?.mode === 'ssh' ? 'Codex via SSH' : status?.mode === 'mock' ? 'Demonstração' : 'Codex local'}</dd><dt>Pasta</dt><dd>{status?.workspace || 'Não conectada'}</dd><dt>Modelo</dt><dd>{conversation?.model || 'Padrão do Codex'}</dd><dt>Esforço</dt><dd>{effortLabel(conversation?.reasoningEffort)}</dd><dt>Velocidade</dt><dd>{speedLabel(conversation?.serviceTier)}</dd><dt>Permissões</dt><dd>{permissionTitle(permissions)}</dd><dt>Aprovação</dt><dd>{permissions.approvalPolicy === 'never' ? 'Sem solicitações de aprovação' : permissions.approvalPolicy === 'untrusted' ? 'Cauteloso' : 'Sob demanda'}</dd></dl>}
     {kind === 'skills' && <><p className="section-description">Habilidades instaladas no seu Codex. Escolha uma para incluir no próximo pedido.</p>{capabilities?.skills?.map((skill,index) => <button key={`${skill.name}-${index}`} className="skill-option" onClick={() => onSkill(skill)}><span className="skill-symbol">$</span><span><strong>{skill.name}</strong><small>{skill.description}</small></span><span>↗</span></button>)}{!loading && !capabilities?.skills?.length && <p className="empty-panel">Nenhuma skill disponível neste ambiente.</p>}</>}
     {kind === 'mcp' && <><p className="section-description">Integrações configuradas no Codex da sua VPS. Esta tela consulta as conexões existentes.</p>{capabilities?.mcp?.map((server,index) => <article key={server.name || index} className="integration-card"><Icon name="command" size={21} /><div><strong>{server.name}</strong><small>{server.status || server.authStatus || 'Configurado'} · {server.toolCount ?? 0} ferramentas</small></div></article>)}{!loading && !capabilities?.mcp?.length && <p className="empty-panel">Nenhuma integração MCP encontrada. As extensões podem ser configuradas na instalação do Codex da VPS.</p>}</>}
-    {kind === 'help' && <><p className="section-description">Digite / no campo de mensagem. Use ↑ ↓ para navegar, Enter para escolher e Esc para fechar.</p><div className="help-command-list">{(capabilities?.commands || fallbackCommands).map(command => <button key={command.name} onClick={() => { onClose(); onCommand(command); }}><code>/{command.name}</code><span>{command.description}</span></button>)}</div><p className="setting-note">O menu reúne ações do painel e recursos compatíveis com o Codex conectado. Comandos exclusivos de outros aplicativos não são executados como comandos de terminal.</p></>}
+    {kind === 'help' && <><p className="section-description">Digite / no campo de mensagem. Use ↑ ↓ para navegar, Enter para escolher e Esc para fechar.</p><div className="help-command-list">{(commands || capabilities?.commands || fallbackCommands).map(command => <button key={command.name} onClick={() => { onClose(); onCommand(command); }}><code>/{command.name}</code><span>{command.description}</span></button>)}</div><p className="setting-note">O menu reúne ações do painel e recursos compatíveis com o Codex conectado. Comandos exclusivos de outros aplicativos não são executados como comandos de terminal.</p></>}
     {capabilities?.warnings?.length > 0 && <p className="setting-note">{capabilities.warnings.join(' ')}</p>}
   </div></Modal>;
 }
@@ -255,6 +271,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [sidebar, setSidebar] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 760px)').matches);
   const [disconnecting, setDisconnecting] = useState(false);
   const [reconnectingVps, setReconnectingVps] = useState(false);
   const [forgettingVps, setForgettingVps] = useState(false);
@@ -275,14 +292,31 @@ export default function App() {
   const [capabilities, setCapabilities] = useState(null);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
   const [info, setInfo] = useState(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
+  const [mediaMode, setMediaMode] = useState('image');
+  const [composeMode, setComposeMode] = useState('chat');
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalMounted, setTerminalMounted] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsMounted, setProjectsMounted] = useState(false);
+  const [projectsDirty, setProjectsDirty] = useState(false);
+  const [projectsScope, setProjectsScope] = useState(null);
+  const [projectConnectionAction, setProjectConnectionAction] = useState(null);
+  const [projectLogout, setProjectLogout] = useState(false);
+  const [terminalInitialDirectory, setTerminalInitialDirectory] = useState(null);
+  const [terminalInstance, setTerminalInstance] = useState(0);
+  const [projectTerminalRequest, setProjectTerminalRequest] = useState(null);
+  const projectEnvironment = JSON.stringify([status?.connection?.host, status?.connection?.port, status?.connection?.username, status?.connection?.fingerprint, status?.workspace]);
   const [modelPending, setModelPending] = useState(false);
   const [newModel, setNewModel] = useState(null);
   const [newReasoningEffort, setNewReasoningEffort] = useState(null);
   const [newServiceTier, setNewServiceTier] = useState(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const fileInputRef = useRef(null);
   const queuedRef = useRef([]);
   const uploadAbort = useRef(null);
@@ -296,23 +330,58 @@ export default function App() {
   const nearBottomRef = useRef(true);
   const composerRef = useRef(null);
   const searchRef = useRef(null);
+  const sidebarRef = useRef(null);
   const copyTimer = useRef(null);
   const autoRead = useRef({ id: null, wasBusy: false });
-  const commandCatalog = capabilities?.commands?.length ? capabilities.commands : fallbackCommands;
-  const slashMatch = !slashDismissed && /^\/([^\s]*)$/.exec(draft);
-  const slashCommands = slashMatch ? commandCatalog.filter(c => `${c.name} ${c.label} ${c.description}`.toLocaleLowerCase('pt-BR').includes(slashMatch[1].toLocaleLowerCase('pt-BR'))) : [];
+  const commandCatalog = buildCommandCatalog(capabilities, fallbackCommands);
+  const slashMatch = paletteOpen ? [null, paletteQuery] : !slashDismissed && /^\/([^\s]*)$/.exec(draft);
+  const slashCommands = slashMatch ? filterCommands(commandCatalog, slashMatch[1]) : [];
   const permissionDefaults = status?.permissions?.defaults || { sandbox: status?.sandbox || 'workspace-write', approvalPolicy: 'untrusted' };
   const permissions = conversation?.permissions || newPermissions || permissionDefaults;
   const allowed = status?.permissions?.allowed || { sandbox: ['read-only', 'workspace-write'], approvalPolicy: ['untrusted', 'on-request'] };
   const modeSelection = conversation || { model: newModel, reasoningEffort: newReasoningEffort, serviceTier: newServiceTier };
   const currentModel = selectedModel(capabilities, modeSelection.model);
   const newConversationSettings = () => ({ permissions: newPermissions || permissionDefaults, model: newModel, reasoningEffort: newReasoningEffort, serviceTier: newServiceTier });
+  const sidebarVisible = isMobile ? sidebar : !preferences.sidebarCollapsed;
+  function toggleSidebar() {
+    if (isMobile) setSidebar(value => !value);
+    else setPreferences(value => ({ ...value, sidebarCollapsed: !value.sidebarCollapsed }));
+  }
+  function openHistory() {
+    setPaletteOpen(false);
+    setSidebar(true); setPreferences(value => ({ ...value, sidebarCollapsed: false }));
+    requestAnimationFrame(() => searchRef.current?.focus());
+  }
+  function openMedia(mode = 'image') { setMediaMode(mode); setMediaOpen(true); setSidebar(false); }
+  function openPalette() { setSidebar(false); setPaletteQuery(''); setPaletteOpen(true); setSlashIndex(0); setSlashDismissed(false); }
+  function closePalette() { setPaletteOpen(false); setSlashDismissed(true); composerRef.current?.focus(); }
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 760px)');
+    const changed = () => { setIsMobile(query.matches); setSidebar(false); };
+    query.addEventListener('change', changed); return () => query.removeEventListener('change', changed);
+  }, []);
+  useEffect(() => {
+    if (!sidebar || !isMobile) return;
+    const previous = document.activeElement;
+    const menu = sidebarRef.current;
+    menu?.querySelector('button')?.focus();
+    const trap = event => {
+      if (event.key !== 'Tab') return;
+      const controls = [...menu.querySelectorAll('button:not(:disabled),input:not(:disabled),a[href]')];
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', trap);
+    return () => { document.removeEventListener('keydown', trap); previous?.focus(); };
+  }, [sidebar, isMobile]);
   useEffect(() => { document.documentElement.dataset.theme = preferences.theme; try { localStorage.setItem('jarvis.preferences.v2', JSON.stringify(preferences)); } catch {} }, [preferences]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   useEffect(() => { setModelPending(false); }, [session?.csrfToken]);
   useEffect(() => { queuedRef.current = queuedFiles; }, [queuedFiles]);
   useEffect(() => () => { uploadAbort.current?.abort(); queuedRef.current.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview); }); }, []);
-  useEffect(() => { setSlashIndex(0); setSlashDismissed(false); }, [draft]);
+  useEffect(() => { setSlashIndex(0); setSlashDismissed(false); }, [draft, paletteQuery]);
+  useEffect(() => { if (!session) { setVoiceOpen(false); setMediaOpen(false); setPaletteOpen(false); } }, [session]);
   function clearAttachments() { queuedRef.current.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview); }); queuedRef.current = []; setQueuedFiles([]); }
 
   const choose = useCallback((id, { keepDraft = false } = {}) => { if (id !== null && selectedRef.current === id) { setSidebar(false); return; } voice.stopListening({ cancel: true }); voice.stopSpeaking(); if (!keepDraft) clearAttachments(); setInfo(null); setFilesOpen(false); selectedRef.current = id; nearBottomRef.current = true; setShowJump(false); setSelected(id); setConversation(null); setApprovals([]); if (!keepDraft) setDraft(''); setSidebar(false); setError(''); }, [voice.stopListening, voice.stopSpeaking]);
@@ -358,12 +427,15 @@ export default function App() {
   }, [conversation, selected, preferences.autoRead]);
   useEffect(() => {
     const key = e => {
-      if (!session) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSidebar(true); setTimeout(() => searchRef.current?.focus(), 50); }
-      if (e.key === 'Escape' && !settings && !deleteDialog && !info && !terminalOpen && !filesOpen && !savedVpsDialog) { setSidebar(false); voice.stopListening(); voice.stopSpeaking(); }
+      if (!session || voiceOpen || mediaOpen || e.defaultPrevented) return;
+      if (!terminalOpen && !projectsOpen && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openHistory(); }
+      if (!settings && !info && !voiceOpen && !mediaOpen && !terminalOpen && !projectsOpen && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); openPalette(); }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'Backquote' && !settings && !deleteDialog && !info && !filesOpen && !savedVpsDialog && !projectTerminalRequest && !projectLogout) { e.preventDefault(); if (terminalOpen) setTerminalOpen(false); else openTerminal(); }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyE' && !settings && !deleteDialog && !info && !filesOpen && !savedVpsDialog && !projectTerminalRequest) { e.preventDefault(); if (!e.repeat) openProjects(); }
+      if (e.key === 'Escape' && !projectsOpen && !settings && !deleteDialog && !info && !terminalOpen && !filesOpen && !savedVpsDialog) { setSidebar(false); voice.stopListening(); voice.stopSpeaking(); }
     };
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
-  }, [session, settings, deleteDialog, info, terminalOpen, filesOpen, savedVpsDialog]);
+  }, [session, settings, deleteDialog, info, terminalOpen, filesOpen, savedVpsDialog, projectsOpen, projectTerminalRequest, projectLogout, voiceOpen, mediaOpen, status?.mode, status?.connected]);
   const mutation = (path, body, method = 'POST') => request(path, { method, csrf: session.csrfToken, body });
   async function newConversation() {
     if (lock.current) return;
@@ -485,7 +557,7 @@ export default function App() {
   function dictate() {
     if (voice.listening) return voice.stopListening();
     voice.stopSpeaking();
-    voice.startListening(text => { setDraft(previous => (previous + (previous && !/\s$/.test(previous) ? ' ' : '') + text).slice(0, 16000)); composerRef.current?.focus(); });
+    voice.startListening(text => { setDraft(previous => (previous + (previous && !/\s$/.test(previous) ? ' ' : '') + text).slice(0, 16000)); if (!voiceOpen) composerRef.current?.focus(); });
   }
   const loadCapabilities = useCallback(async () => {
     const token = sessionRef.current?.csrfToken;
@@ -496,7 +568,57 @@ export default function App() {
     finally { if (token === sessionRef.current?.csrfToken) setCapabilitiesLoading(false); }
   }, [showError]);
   useEffect(() => { if (session) loadCapabilities(); }, [session?.csrfToken, status?.connected, loadCapabilities]);
-  useEffect(() => { if (!session || (status?.mode === 'ssh' && !status.connected)) setTerminalOpen(false); }, [session, status?.connected, status?.mode]);
+  useEffect(() => {
+    if (!session) { setTerminalOpen(false); setTerminalMounted(false); setProjectsOpen(false); setProjectsMounted(false); setProjectsDirty(false); setProjectsScope(null); setProjectConnectionAction(null); setProjectTerminalRequest(null); setProjectLogout(false); return; }
+    if (status?.mode === 'ssh' && !status.connected) {
+      setTerminalOpen(false); setTerminalMounted(false); setProjectTerminalRequest(null);
+      if (!projectsDirty) { setProjectsOpen(false); setProjectsMounted(false); setProjectsScope(null); }
+    } else if (projectsScope && projectsScope.signature !== projectEnvironment && !projectsDirty) { setProjectsOpen(false); setProjectsMounted(false); setProjectsScope(null); }
+  }, [session, status?.connected, status?.mode, projectEnvironment, projectsDirty, projectsScope]);
+  function openTerminal() {
+    if (status?.mode !== 'ssh' || !status.connected) { setError('Conecte sua VPS por SSH para abrir o terminal.'); setSidebar(false); return; }
+    setProjectsOpen(false); setTerminalMounted(true); setTerminalOpen(true); setSidebar(false);
+  }
+  function openProjects() {
+    if (projectsMounted && projectsDirty) { setTerminalOpen(false); setFilesOpen(false); setSavedVpsDialog(false); setSidebar(false); setProjectsOpen(true); return; }
+    if (status?.mode !== 'ssh' || !status.connected) { setError('Conecte sua VPS para abrir a área de projetos.'); setSidebar(false); return; }
+    setTerminalOpen(false); setFilesOpen(false); setSettings(false); setInfo(null); setSidebar(false);
+    setProjectsScope({ signature: projectEnvironment, workspace: status.workspace }); setProjectsMounted(true); setProjectsOpen(true);
+  }
+  function projectDirectory(path) {
+    if (!status?.connected || (projectsScope && projectsScope.signature !== projectEnvironment)) throw new Error('Reconecte a VPS deste projeto antes de continuar.');
+    if (typeof path !== 'string' || /[\x00-\x1f\x7f]/.test(path) || path.split('/').includes('..')) throw new Error('Pasta do projeto inválida.');
+    const root = status.workspace.replace(/\/$/, '') || '/';
+    const absolute = path.startsWith('/') ? path : path === '.' ? root : `${root === '/' ? '' : root}/${path}`;
+    if (root !== '/' && absolute !== root && !absolute.startsWith(root + '/')) throw new Error('A pasta precisa estar no workspace atual.');
+    return absolute;
+  }
+  function launchProjectTerminal(directory) {
+    setProjectTerminalRequest(null); setProjectsOpen(false); setTerminalInitialDirectory(directory);
+    setTerminalInstance(value => value + 1); setTerminalMounted(true); setTerminalOpen(true); setSidebar(false);
+  }
+  function openProjectTerminal(path) {
+    try {
+      const directory = projectDirectory(path);
+      if (terminalMounted && terminalInitialDirectory !== directory) { setProjectsOpen(false); setProjectTerminalRequest(directory); return; }
+      if (terminalMounted) openTerminal(); else launchProjectTerminal(directory);
+    } catch (error) { showError(error); }
+  }
+  function useProjectInChat(project) {
+    try {
+      const directory = projectDirectory(project.path);
+      setProjectsOpen(false); setSidebar(false);
+      setDraft(previous => `Trabalhe no projeto ${JSON.stringify(directory)}. ${previous}`);
+      requestAnimationFrame(() => composerRef.current?.focus());
+    } catch (error) { showError(error); }
+  }
+  function requestSshDisconnect() { if (projectsDirty) setProjectConnectionAction('disconnect'); else sshDisconnect(); }
+  function requestEditVps() { if (projectsDirty) { setSavedVpsDialog(false); setProjectConnectionAction('edit'); } else editVps(); }
+  function discardAndChangeConnection() {
+    const action = projectConnectionAction; setProjectConnectionAction(null); setProjectsMounted(false); setProjectsOpen(false); setProjectsDirty(false); setProjectsScope(null);
+    if (action === 'edit') editVps(); else sshDisconnect();
+  }
+  function requestLogout() { if (projectsDirty) setProjectLogout(true); else logout(); }
   function addFiles(fileList) {
     if (sending) return;
     if (status?.mode === 'ssh' && !status.connected) { setError('Conecte sua VPS antes de anexar arquivos.'); return; }
@@ -543,17 +665,29 @@ export default function App() {
     finally { if (token === sessionRef.current?.csrfToken) setModelPending(false); }
   }
   async function runCommand(command, args = '') {
-    setSlashDismissed(true); setSlashIndex(0); setDraft('');
+    if (!command || command.enabled === false) { setError('Este recurso não está disponível na conexão atual.'); return; }
+    const inlineCommand = !paletteOpen && draft.startsWith('/');
+    setSlashDismissed(true); setSlashIndex(0); setPaletteOpen(false);
+    requestAnimationFrame(() => { if (document.activeElement === document.body) composerRef.current?.focus(); });
+    if (inlineCommand) setDraft('');
     const name = command.name.replace(/^\//, '');
+    if (['history', 'resume'].includes(name)) { openHistory(); return; }
+    if (name === 'projects') { openProjects(); return; }
+    if (name === 'voice') { setVoiceOpen(true); return; }
+    if (name === 'theme') { setPreferences(p => ({ ...p, theme: p.theme === 'dark' ? 'light' : 'dark' })); return; }
+    if (name === 'stop') { if (conversation?.busy) await interrupt(); else setError('Nenhuma resposta em andamento.'); return; }
+    if (['image', 'design', 'media'].includes(name)) { if (args) setDraft(args); openMedia(name === 'design' ? 'design' : 'image'); return; }
+    if (name === 'ultra') { openPerformance(); return; }
+    if (name === 'copy') { const last = [...(conversation?.messages || [])].reverse().find(m => m.role === 'assistant'); if (last) await copy(last.text, last.id); else setError('Ainda não há uma resposta para copiar.'); return; }
     if (name === 'new') return newConversation();
-    if (name === 'permissions') { setSettings(true); return; }
+    if (['permissions', 'settings'].includes(name)) { setSettings(true); return; }
     if (['model','effort','fast'].includes(name)) { openPerformance(); return; }
     if (name === 'delete') { if (conversation) requestDelete(conversation); else setError('Abra uma conversa para excluir.'); return; }
-    if (name === 'terminal') { setTerminalOpen(true); setSidebar(false); return; }
+    if (name === 'terminal') { openTerminal(); return; }
     if (name === 'files') return openFiles();
     if (name === 'attach') { fileInputRef.current?.click(); return; }
-    if (name === 'export') { if (conversation) exportConversation(); else setError('Abra uma conversa para exportar o histórico.'); return; }
-    if (name === 'clear') { clearAttachments(); return; }
+    if (['export', 'download'].includes(name)) { if (conversation) exportConversation(); else setError('Abra uma conversa para exportar o histórico.'); return; }
+    if (name === 'clear') { setDraft(''); clearAttachments(); return; }
     if (['status','skills','mcp','help'].includes(name)) { setInfo(name); if (['skills','mcp'].includes(name)) loadCapabilities(); return; }
     if (name === 'compact') {
       if (!selectedRef.current) { setError('Inicie uma conversa antes de compactar o contexto.'); return; }
@@ -562,13 +696,13 @@ export default function App() {
       return;
     }
     const prompts = { plan: 'Prepare um plano detalhado para a tarefa abaixo. Primeiro investigue o contexto e aguarde minha confirmação antes de implementar:\n\n', review: 'Faça uma revisão de código deste projeto. Priorize bugs e regressões, descreva os achados com arquivos e linhas e não altere arquivos sem minha solicitação.\n\n', init: 'Investigue este projeto e proponha ou atualize um arquivo AGENTS.md com instruções úteis para trabalhar aqui. Respeite instruções existentes.\n\n' };
-    setDraft((command.prompt || prompts[name] || `/${name} `) + args);
+    setDraft(((command.prompt || prompts[name] || `/${name} `) + (args || (!inlineCommand ? draft : ''))).slice(0,16000));
     requestAnimationFrame(() => composerRef.current?.focus());
   }
   function composerKey(event) {
     if (event.nativeEvent.isComposing) return;
     if (slashMatch && !slashDismissed) {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSlashDismissed(true); return; }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePalette(); return; }
       if (slashCommands.length && ['ArrowDown','ArrowUp'].includes(event.key)) { event.preventDefault(); setSlashIndex(index => (index + (event.key === 'ArrowDown' ? 1 : -1) + slashCommands.length) % slashCommands.length); return; }
       if (slashCommands.length && ['Enter','Tab'].includes(event.key) && !event.shiftKey) { event.preventDefault(); runCommand(slashCommands[Math.min(slashIndex,slashCommands.length-1)]); return; }
     }
@@ -588,40 +722,51 @@ export default function App() {
   const sshTarget = status?.connection ? `${status.connection.username}@${status.connection.host}` : '';
   const messages = conversation?.messages || [];
   const filtered = conversations.filter(c => c.title.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
-  const examples = [ ['terminal', 'Explore seu projeto', 'Me explique a estrutura deste projeto e sugira melhorias.'], ['shield', 'Investigue um problema', 'Me ajude a investigar um erro. Por onde devemos começar?'], ['chat', 'Tire uma ideia do papel', 'Me ajude a planejar os próximos passos de um novo projeto.'] ];
-  return <div className={`workspace text-${preferences.fontSize}`}>
+  const examples = [ ['terminal', 'Construir algo novo', 'Me ajude a criar um projeto. Primeiro entenda a ideia, investigue o workspace e proponha os próximos passos.'], ['image', 'Dar forma a uma ideia', 'media'], ['brain', 'Resolver um desafio', 'Investigue este projeto e encontre oportunidades para melhorar a experiência do usuário, a qualidade e o desempenho.'] ];
+  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.text);
+  const historyGroup = value => { const date = new Date(value); if (Number.isNaN(date.getTime())) return 'Anteriores'; const today = new Date(); today.setHours(0,0,0,0); date.setHours(0,0,0,0); const days = Math.round((today - date) / 86400000); return days <= 0 ? 'Hoje' : days === 1 ? 'Ontem' : days < 7 ? 'Últimos 7 dias' : 'Anteriores'; };
+  const isUltra = modeSelection.reasoningEffort === 'ultra';
+  return <div className={`workspace premium-workspace text-${preferences.fontSize} ${preferences.sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${isUltra ? 'ultra-workspace' : ''}`}>
     <a className="skip-link" href="#composer">Ir para mensagem</a>
     {sidebar && <button className="sidebar-overlay" aria-label="Fechar menu" onClick={() => setSidebar(false)} />}
-    <aside className={`sidebar ${sidebar ? 'is-open' : ''}`} aria-label="Navegação principal">
-      <div className="sidebar-brand"><Brand compact /><span className="workspace-tag">ADMIN · V5</span><button className="icon-button mobile-only" aria-label="Fechar menu" onClick={() => setSidebar(false)}><Icon name="close" /></button></div>
+    <aside ref={sidebarRef} id="workspace-navigation" className={`sidebar ${sidebar ? 'is-open' : ''}`} aria-label="Navegação principal" inert={terminalOpen || projectsOpen || !sidebarVisible}>
+      <div className="sidebar-brand"><Brand compact /><span className="workspace-tag">WORKSPACE / 08</span><button className="icon-button sidebar-close" aria-label="Fechar menu" onClick={toggleSidebar}><Icon name="panel" size={17} /></button></div>
       <button className="new-conversation" onClick={newConversation} disabled={sending}><Icon name="plus" size={19} /> Nova conversa <span>↗</span></button>
+      <div className="workspace-nav" aria-label="Ferramentas do workspace"><button onClick={openPalette}><Icon name="command" size={17} /><span>Central de comandos</span><kbd>⌘ J</kbd></button><button onClick={() => openMedia()}><Icon name="image" size={17} /><span>Estúdio criativo</span><span className="nav-new">NOVO</span></button><button onClick={() => { setVoiceOpen(true); setSidebar(false); }}><Icon name="mic" size={17} /><span>Estúdio de voz</span></button></div>
       <div className="search-box"><Icon name="search" size={17} /><input ref={searchRef} aria-label="Buscar conversas" placeholder="Buscar conversas" value={search} onChange={e => setSearch(e.target.value)} /><kbd>⌘ K</kbd></div>
-      <div className="sidebar-label">RECENTES <span>{conversations.length}</span></div>
-      <nav className="conversation-list" aria-label="Conversas">{filtered.length ? filtered.map(item => <div key={item.id} className={`conversation-row ${selected === item.id ? 'active' : ''}`}><button className={`conversation-link ${selected === item.id ? 'active' : ''}`} aria-current={selected === item.id ? 'page' : undefined} disabled={sending} onClick={() => choose(item.id)}><Icon name="chat" size={17} /><span><strong>{item.title || 'Nova conversa'}</strong><small>{formatDate(item.updatedAt || item.createdAt)}{item.busy ? ' · Em andamento' : ''}</small></span>{item.busy && <span className="status-dot" />}</button><button className="conversation-delete" type="button" aria-label={`Excluir conversa: ${item.title || 'Nova conversa'}`} title="Excluir conversa" disabled={sending || item.busy || deleting} onClick={() => requestDelete(item)}><Icon name="trash" size={15} /></button></div>) : <p className="empty-list">{search ? 'Nenhuma conversa encontrada.' : 'Suas conversas ficam salvas aqui. Comece algo novo.'}</p>}</nav>
-      <div className="sidebar-bottom"><div className="environment"><span className="environment-icon"><Icon name="terminal" size={18} /></span><div><strong>{status?.mode === 'mock' ? 'Demonstração' : sshMode ? sshTarget || 'Sua VPS' : 'Codex workspace'}</strong><small title={status?.workspace || ''}>{status?.mode === 'mock' ? 'Ambiente de testes' : status?.workspace || 'Conecte para começar'}</small></div><span className={`status-dot ${status?.connected ? '' : 'offline'}`} /></div><div className="admin-tools"><button onClick={() => { setTerminalOpen(true); setSidebar(false); }}><Icon name="terminal" size={17} />Terminal</button><button onClick={openFiles}><Icon name="folder" size={17} />Arquivos</button></div>{sshMode && <button className="sidebar-settings saved-connection-link" onClick={() => { setSavedVpsDialog(true); setSidebar(false); }}><Icon name="lock" size={17} /><span>{status.savedConnection ? 'VPS salva' : 'Minha VPS'}</span>{status.savedConnection && <Icon name="check" size={14} />}</button>}<button className="sidebar-settings" onClick={() => setSettings(true)}><Icon name="settings" size={18} />Configurações</button><div className="account"><span className="avatar">{session.user.username.slice(0, 1).toUpperCase()}</span><div><strong>{session.user.username}</strong><small>Administrador</small></div><button className="icon-button" aria-label="Sair da conta" title="Sair da conta" onClick={logout}><Icon name="logout" size={18} /></button></div></div>
+      <div className="sidebar-label">HISTÓRICO <span>{conversations.length}</span></div>
+      <nav className="conversation-list" aria-label="Conversas">{filtered.length ? filtered.map((item, index) => <div key={item.id} className="history-item">{(index === 0 || historyGroup(item.updatedAt || item.createdAt) !== historyGroup(filtered[index-1].updatedAt || filtered[index-1].createdAt)) && <p className="history-group">{historyGroup(item.updatedAt || item.createdAt)}</p>}<div className={`conversation-row ${selected === item.id ? 'active' : ''}`}><button className={`conversation-link ${selected === item.id ? 'active' : ''}`} aria-current={selected === item.id ? 'page' : undefined} disabled={sending} onClick={() => choose(item.id)}><Icon name="chat" size={17} /><span><strong>{item.title || 'Nova conversa'}</strong><small>{formatDate(item.updatedAt || item.createdAt)}{item.busy ? ' · Em andamento' : ''}</small></span>{item.busy && <span className="status-dot" />}</button><button className="conversation-delete" type="button" aria-label={`Excluir conversa: ${item.title || 'Nova conversa'}`} title="Excluir conversa" disabled={sending || item.busy || deleting} onClick={() => requestDelete(item)}><Icon name="trash" size={15} /></button></div></div>) : <p className="empty-list">{search ? 'Nenhuma conversa encontrada.' : 'Suas conversas ficam salvas aqui. Comece algo novo.'}</p>}</nav>
+      <div className="sidebar-bottom"><div className="environment"><span className="environment-icon"><Icon name="terminal" size={18} /></span><div><strong>{status?.mode === 'mock' ? 'Demonstração' : sshMode ? sshTarget || 'Sua VPS' : 'Codex workspace'}</strong><small title={status?.workspace || ''}>{status?.mode === 'mock' ? 'Ambiente de testes' : status?.workspace || 'Conecte para começar'}</small></div><span className={`status-dot ${status?.connected ? '' : 'offline'}`} /></div><button type="button" className="project-workspace-link" onClick={openProjects} onPointerEnter={prepareProjects} onFocus={prepareProjects}><Icon name="folder" size={21} /><span><strong>Área de projetos</strong><small>Repositórios, pastas e código</small></span><span aria-hidden="true">↗</span></button><div className="admin-tools"><button onClick={openTerminal} onPointerEnter={prepareTerminal} onFocus={prepareTerminal}><Icon name="terminal" size={17} />Terminal</button><button onClick={openFiles}><Icon name="folder" size={17} />Arquivos</button></div>{sshMode && <button className="sidebar-settings saved-connection-link" onClick={() => { setSavedVpsDialog(true); setSidebar(false); }}><Icon name="lock" size={17} /><span>{status.savedConnection ? 'VPS salva' : 'Minha VPS'}</span>{status.savedConnection && <Icon name="check" size={14} />}</button>}<button className="sidebar-settings" onClick={() => setSettings(true)}><Icon name="settings" size={18} />Configurações</button><div className="account"><span className="avatar">{session.user.username.slice(0, 1).toUpperCase()}</span><div><strong>{session.user.username}</strong><small>Administrador</small></div><button className="icon-button" aria-label="Sair da conta" title="Sair da conta" onClick={requestLogout}><Icon name="logout" size={18} /></button></div></div>
     </aside>
-    <main className={`chat-panel ${dragging ? 'is-dragging' : ''}`} onDragEnter={e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); dragCount.current++; setDragging(true); } }} onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }} onDragLeave={e => { e.preventDefault(); dragCount.current = Math.max(0, dragCount.current - 1); if (!dragCount.current) setDragging(false); }} onDrop={e => { e.preventDefault(); dragCount.current = 0; setDragging(false); addFiles(e.dataTransfer.files); }}>
+    <main className={`chat-panel ${dragging ? 'is-dragging' : ''}`} inert={terminalOpen || projectsOpen || (isMobile && sidebar)} onDragEnter={e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); dragCount.current++; setDragging(true); } }} onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }} onDragLeave={e => { e.preventDefault(); dragCount.current = Math.max(0, dragCount.current - 1); if (!dragCount.current) setDragging(false); }} onDrop={e => { e.preventDefault(); dragCount.current = 0; setDragging(false); addFiles(e.dataTransfer.files); }}>
       {dragging && <div className="file-drop-zone"><Icon name="attachment" size={37} /><strong>Solte os arquivos aqui</strong><span>Imagens, PDF, ZIP e outros arquivos · até 25 MB cada</span></div>}
-      <header className="chat-header"><div className="header-title"><button className="icon-button mobile-only" aria-label="Abrir menu" onClick={() => setSidebar(true)}><Icon name="menu" /></button><div><h1>{conversation?.title || 'Luck'}<span className="header-badge">admin · v5</span></h1><p>{sshMode ? status.connected ? `SSH · ${sshTarget}` : 'Seu assistente conectado à sua VPS' : status?.mode === 'mock' ? 'Ambiente de demonstração' : 'Seu assistente de trabalho'}</p></div></div><div className="header-actions"><span className={`connection-state ${connection === 'connected' ? '' : 'pending'}`} title="Conexão de atualizações em tempo real"><span className="status-dot" />{connection === 'connected' ? 'Ao vivo' : 'Reconectando'}</span>{sshMode && status.connected && <button className="ssh-disconnect" onClick={sshDisconnect} disabled={disconnecting || Boolean(status.busy || busy)}>{disconnecting ? 'Saindo…' : 'Desconectar SSH'}</button>}{conversation && <button className="icon-button delete-chat-button" title="Excluir conversa atual" aria-label="Excluir conversa atual" disabled={busy || deleting} onClick={() => requestDelete(conversation)}><Icon name="trash" size={18} /></button>}{conversation && <button className="icon-button" title="Exportar conversa" aria-label="Exportar conversa" onClick={exportConversation}><Icon name="download" size={19} /></button>}<button className="icon-button" title="Alternar tema" aria-label="Alternar tema" onClick={() => setPreferences(p => ({ ...p, theme: p.theme === 'dark' ? 'light' : 'dark' }))}><Icon name={preferences.theme === 'dark' ? 'sun' : 'moon'} size={19} /></button><button className="icon-button" aria-label="Configurar conversa" title="Configurar conversa" disabled={Boolean(selected && !conversation)} onClick={() => setSettings(true)}><Icon name="settings" size={19} /></button></div></header>
+      <header className="chat-header"><div className="header-title"><button className="icon-button history-toggle" aria-label={sidebarVisible ? "Fechar histórico" : "Abrir histórico"} aria-expanded={sidebarVisible} aria-controls="workspace-navigation" title="Abrir ou fechar histórico" onClick={toggleSidebar}><Icon name="panel" /></button><div><h1>{conversation?.title || 'Meu workspace'}<span className={`header-badge ${isUltra ? 'ultra-badge' : ''}`}>{isUltra ? 'ULTRA' : 'JARVIS 08'}</span></h1><p>{sshMode ? status.connected ? `SSH · ${sshTarget}` : 'Seu assistente conectado à sua VPS' : status?.mode === 'mock' ? 'Ambiente de demonstração' : 'Seu assistente de trabalho'}</p></div></div><div className="header-actions"><button type="button" className="header-voice" aria-label="Abrir estúdio de voz" onClick={() => setVoiceOpen(true)}><Icon name="mic" size={16} /><span>Modo de voz</span></button><button type="button" className="icon-button projects-header-button" aria-label="Abrir área de projetos" title="Área de projetos (Ctrl+Shift+E)" onClick={openProjects} onPointerEnter={prepareProjects} onFocus={prepareProjects}><Icon name="folder" size={19} /></button><span className={`connection-state ${connection === 'connected' ? '' : 'pending'}`} title="Conexão de atualizações em tempo real"><span className="status-dot" />{connection === 'connected' ? 'Ao vivo' : 'Reconectando'}</span>{sshMode && status.connected && <button className="ssh-disconnect" onClick={requestSshDisconnect} disabled={disconnecting || Boolean(status.busy || busy)}>{disconnecting ? 'Saindo…' : 'Desconectar SSH'}</button>}{conversation && <button className="icon-button delete-chat-button" title="Excluir conversa atual" aria-label="Excluir conversa atual" disabled={busy || deleting} onClick={() => requestDelete(conversation)}><Icon name="trash" size={18} /></button>}{conversation && <button className="icon-button" title="Exportar conversa" aria-label="Exportar conversa" onClick={exportConversation}><Icon name="download" size={19} /></button>}<button className="icon-button" title="Alternar tema" aria-label="Alternar tema" onClick={() => setPreferences(p => ({ ...p, theme: p.theme === 'dark' ? 'light' : 'dark' }))}><Icon name={preferences.theme === 'dark' ? 'sun' : 'moon'} size={19} /></button><button className="icon-button" aria-label="Configurar conversa" title="Configurar conversa" disabled={Boolean(selected && !conversation)} onClick={() => setSettings(true)}><Icon name="settings" size={19} /></button></div></header>
       {status?.mode === 'mock' && <div className="demo-banner"><span className="demo-tag">DEMO</span> Ambiente de teste. As respostas são simuladas e nenhum comando é executado.</div>}
       {(error || voice.error) && <div className="error-banner" role="alert"><span>{error || voice.error}</span><button className="icon-button" aria-label="Fechar aviso" onClick={() => { setError(''); voice.clearError(); }}><Icon name="close" size={17} /></button></div>}
       <section className="chat-scroll" ref={scrollRef} onScroll={() => { const el = scrollRef.current; if (el) { nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 180; setShowJump(!nearBottomRef.current); } }} aria-label="Mensagens da conversa" aria-busy={Boolean(busy)}>
-        {sshDisconnected && (editingVps || (!status.savedConnection && !status.autoReconnectError && !status.savedConnectionError) ? <SshConnect key={`${session.csrfToken}-${editingVps}`} csrf={session.csrfToken} occupied={status.ownedByAnotherSession} onConnected={sshConnected} onUnauthorized={showError} initialTarget={editingVps ? status.savedConnection : null} onCancel={editingVps && status.savedConnection ? () => setEditingVps(false) : null} /> : <div className="ssh-connect-wrap"><SavedVps profile={status.savedConnection} occupied={status.ownedByAnotherSession} pending={reconnectingVps || status.reconnecting} forgetting={forgettingVps} error={status.autoReconnectError || status.savedConnectionError} onReconnect={reconnectVps} onForget={forgetVps} onEdit={editVps} /></div>)}
+        {sshDisconnected && (editingVps || (!status.savedConnection && !status.autoReconnectError && !status.savedConnectionError) ? <SshConnect key={`${session.csrfToken}-${editingVps}`} csrf={session.csrfToken} occupied={status.ownedByAnotherSession} onConnected={sshConnected} onUnauthorized={showError} initialTarget={editingVps ? status.savedConnection : null} onCancel={editingVps && status.savedConnection ? () => setEditingVps(false) : null} /> : <div className="ssh-connect-wrap"><SavedVps profile={status.savedConnection} occupied={status.ownedByAnotherSession} pending={reconnectingVps || status.reconnecting} forgetting={forgettingVps} error={status.autoReconnectError || status.savedConnectionError} onReconnect={reconnectVps} onForget={forgetVps} onEdit={requestEditVps} /></div>)}
         {selected && !conversation && <div className="conversation-loading" role="status"><span className="spinner" />Carregando conversa…</div>}
         {!selected && !status && <div className="conversation-loading" role="status"><span className="spinner" />Conectando ao workspace…</div>}
-        {!messages.length && !busy && !(selected && !conversation) ? !sshDisconnected && status && <div className="welcome"><div className="welcome-emblem"><div className="welcome-logo"><img src="/luck-shepherd.svg" alt="Luck, pastor-alemão" /></div><span>LUCK · SEU PARCEIRO DE TRABALHO</span></div><h2>O que vamos criar hoje<span>?</span></h2><p>Uma ideia, uma pergunta ou um desafio.<br />O Luck ajuda você a dar o próximo passo.</p><div className="suggestions">{examples.map(([icon, title, text]) => <button key={title} onClick={() => { setDraft(text); composerRef.current?.focus(); }}><Icon name={icon} size={21} /><strong>{title}</strong><span>{text}</span><span className="suggestion-arrow">↗</span></button>)}</div><div className="welcome-note"><Icon name="shield" size={14} />Você define as permissões. O Luck cuida do próximo passo.</div></div> : <div className="messages">{messages.map(message => <Message key={message.id} message={message} username={session.user.username} preferences={preferences} voice={voice} onCopy={copy} copied={copied} conversationId={selected} workspace={status?.workspace} />)}{busy && <div className="working-indicator" role="status"><span className="thinking-dots"><i /><i /><i /></span>{approvals.length ? 'Aguardando sua aprovação' : 'Luck está trabalhando'}<span className="working-line" /></div>}{approvals.map(approval => <Approval key={approval.id} approval={approval} disabled={deciding} onDecide={decide} />)}<div ref={endRef} /></div>}
+        {!messages.length && !busy && !(selected && !conversation) ? !sshDisconnected && status && <div className="welcome"><div className="welcome-emblem"><Orb /><span><span className="status-dot" /> SEU ESPAÇO PARA IR ALÉM</span></div><h2>Grandes ideias.<br /><span>Novas possibilidades.</span></h2><p>Converse, desenvolva e crie com o seu Jarvis.<br />Tudo o que você precisa, em um só lugar.</p><div className="suggestions">{examples.map(([icon, title, text]) => <button key={title} onClick={() => { if (text === 'media') { openMedia(); return; } setComposeMode('chat'); setDraft(text); composerRef.current?.focus(); }}><Icon name={icon} size={21} /><strong>{title}</strong><span>{title === 'Dar forma a uma ideia' ? 'Imagens, identidade visual e direção de arte.' : title === 'Construir algo novo' ? 'Do primeiro plano ao código do seu projeto.' : 'Investigue, revise e encontre o próximo passo.'}</span><span className="suggestion-arrow">↗</span></button>)}</div><div className="welcome-note"><kbd>/</kbd> Todas as ferramentas, a um comando de distância.</div></div> : <div className="messages">{messages.map(message => <Message key={message.id} message={message} username={session.user.username} preferences={preferences} voice={voice} onCopy={copy} copied={copied} conversationId={selected} workspace={status?.workspace} />)}{busy && <div className="working-indicator" role="status"><Orb active small /><div className="working-copy"><strong>{approvals.length ? 'Aguardando sua aprovação' : 'Transformando ideias em ação'}</strong><span>{approvals.length ? 'Revise a solicitação para continuar.' : isUltra ? 'Ultra · investigando e desenvolvendo a resposta…' : 'Jarvis está trabalhando na sua resposta…'}</span></div><span className="thinking-dots"><i /><i /><i /></span></div>}{approvals.map(approval => <Approval key={approval.id} approval={approval} disabled={deciding} onDecide={decide} />)}<div ref={endRef} /></div>}
       </section>
       {showJump && <button className="jump-button" aria-label="Ir para o fim da conversa" onClick={() => { nearBottomRef.current = true; setShowJump(false); endRef.current?.scrollIntoView({ behavior: 'smooth' }); }}><Icon name="down" size={19} /> Mensagens recentes</button>}
-      <div className="composer-wrap">{voice.listening && <div className="listening-banner" role="status"><span className="recording-dot" /><strong>Ouvindo…</strong><span>{voice.interim || 'Pode falar. O texto ficará disponível para revisão.'}</span><button onClick={voice.stopListening} className="subtle-button">Concluir</button></div>}<input ref={fileInputRef} type="file" multiple className="sr-only" tabIndex={-1} aria-label="Selecionar anexos" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+      <div className="composer-wrap"><div className="compose-modes" aria-label="Modos de criação"><button className={composeMode === 'chat' ? 'is-selected' : ''} aria-pressed={composeMode === 'chat'} onClick={() => setComposeMode('chat')}><Icon name="chat" size={15} />Conversar</button><button className={composeMode === 'image' ? 'is-selected' : ''} aria-pressed={composeMode === 'image'} onClick={() => openMedia('image')}><Icon name="image" size={15} />Criar imagem</button><button className={composeMode === 'design' ? 'is-selected' : ''} aria-pressed={composeMode === 'design'} onClick={() => openMedia('design')}><Icon name="sparkle" size={15} />Design</button><button className={composeMode === 'code' ? 'is-selected' : ''} aria-pressed={composeMode === 'code'} onClick={() => { setComposeMode('code'); if (!draft.trim()) setDraft('Me ajude a desenvolver uma solução para este projeto: '); composerRef.current?.focus(); }}><Icon name="terminal" size={15} />Código</button><button className="modes-more" aria-label="Explorar todos os comandos" title="Central de comandos" onClick={openPalette}><Icon name="command" size={15} /></button></div>{voice.listening && <div className="listening-banner" role="status"><span className="recording-dot" /><strong>Ouvindo…</strong><span>{voice.interim || 'Pode falar. O texto ficará disponível para revisão.'}</span><button onClick={voice.stopListening} className="subtle-button">Concluir</button></div>}<input ref={fileInputRef} type="file" multiple className="sr-only" tabIndex={-1} aria-label="Selecionar anexos" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
       <div className="performance-controls" aria-label="Modelo, esforço e velocidade"><button type="button" className="performance-model" aria-label="Escolher modelo e modos" title="Modelo e desempenho" disabled={busy || Boolean(selected && !conversation)} onClick={openPerformance}><Icon name="command" size={14} /><span>{modeSelection.model ? currentModel?.displayName || modeSelection.model : 'Modelo padrão'}</span><Icon name="down" size={12} /></button><button type="button" className={modeSelection.reasoningEffort ? 'performance-active' : ''} aria-label="Alterar esforço de raciocínio" title="Esforço de raciocínio" disabled={busy || Boolean(selected && !conversation)} onClick={openPerformance}><Icon name="brain" size={14} /><span>{effortLabel(modeSelection.reasoningEffort)}</span><Icon name="down" size={12} /></button><button type="button" className={modeSelection.serviceTier && modeSelection.serviceTier !== 'default' ? 'performance-active' : ''} aria-label="Alterar velocidade de resposta" title="Velocidade de resposta" disabled={busy || Boolean(selected && !conversation)} onClick={openPerformance}><Icon name="bolt" size={14} /><span>{modeSelection.serviceTier ? speedLabel(modeSelection.serviceTier) : 'Velocidade padrão'}</span><Icon name="down" size={12} /></button></div>
-      {slashMatch && <SlashMenu query={slashMatch[1]} commands={slashCommands} onSelect={runCommand} onClose={() => setSlashDismissed(true)} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} />}
-      <form id="composer" className={`composer ${voice.listening ? 'is-listening' : ''}`} onSubmit={send}>{queuedFiles.length > 0 && <AttachmentList attachments={queuedFiles} onRemove={sending ? undefined : removeFile} />}{uploading && <div className="upload-status" role="status"><span className="spinner" />Enviando anexos para o workspace…</div>}<textarea ref={composerRef} aria-label="Sua mensagem para o Luck" placeholder={sshDisconnected ? 'Conecte sua VPS para começar' : 'Pergunte ao Luck, anexe arquivos ou digite / para comandos…'} disabled={sshDisconnected || sending} value={draft} maxLength={16000} rows={2} onChange={e => setDraft(e.target.value)} onPaste={composerPaste} aria-expanded={Boolean(slashMatch)} aria-controls={slashMatch ? 'slash-command-menu' : undefined} aria-activedescendant={slashMatch && slashCommands.length ? `slash-command-${Math.min(slashIndex,slashCommands.length-1)}` : undefined} onKeyDown={composerKey} /><div className="composer-toolbar"><div className="composer-options"><button type="button" className="icon-button attach-button" aria-label="Anexar arquivos" title="Anexar imagens, PDF, ZIP e outros arquivos" disabled={sshDisconnected || sending} onClick={() => fileInputRef.current?.click()}><Icon name="attachment" size={19} /></button><button type="button" className="slash-toggle" aria-label="Abrir comandos" title="Comandos (/)" onClick={() => { setDraft('/'); setSlashDismissed(false); composerRef.current?.focus(); }}>/</button><div className="format-buttons"><button type="button" aria-label="Inserir negrito" title="Negrito (Ctrl+B)" disabled={sshDisconnected} onClick={() => formatDraft('**')}><b>B</b></button><button type="button" aria-label="Inserir itálico" title="Itálico (Ctrl+I)" disabled={sshDisconnected} onClick={() => formatDraft('_')}><i>I</i></button><button type="button" aria-label="Inserir código" title="Código" disabled={sshDisconnected} onClick={() => formatDraft('`', '`', 'código')}>‹/›</button></div><button type="button" className={`permission-chip ${permissions.sandbox === 'danger-full-access' ? 'is-full-access' : ''}`} onClick={() => setSettings(true)} disabled={Boolean(selected && !conversation)} title="Configurar permissões"><Icon name="shield" size={14} /><span>{permissionTitle(permissions)}</span><Icon name="down" size={12} /></button></div><div className="composer-actions">{draft.length > 14000 && <span className="char-count">{draft.length}/16000</span>}{voice.supportedSpeech && voice.speakingId && <button type="button" className="icon-button is-speaking" aria-label="Parar leitura" onClick={voice.stopSpeaking}><Icon name="stop" size={18} /></button>}<button type="button" className={`icon-button mic-button ${voice.listening ? 'active' : ''}`} aria-label={voice.listening ? 'Parar ditado' : 'Ditar mensagem'} aria-pressed={voice.listening} title={voice.supportedRecognition ? 'Ditar mensagem' : 'Ditado indisponível neste navegador'} disabled={sshDisconnected || sending} onClick={dictate}><Icon name={voice.listening ? 'stop' : 'mic'} size={19} /></button>{busy ? <button type="button" className="stop-button" onClick={interrupt} disabled={sending} aria-label="Interromper resposta"><Icon name="stop" size={16} /></button> : <button className="send-button" type="submit" disabled={sshDisconnected || (!draft.trim() && !queuedFiles.length) || sending || (selected !== null && !conversation)} aria-label="Enviar mensagem"><Icon name="arrow" size={21} /></button>}</div></div></form><p className="composer-note"><span>O Luck pode cometer erros. Revise informações e ações importantes.</span><span className="keyboard-hint">/ comandos · Enter enviar · Shift + Enter nova linha</span></p></div>
+      {slashMatch && <SlashMenu query={slashMatch[1]} commands={slashCommands} onQueryChange={paletteOpen ? setPaletteQuery : undefined} onKeyDown={composerKey} onSelect={runCommand} onClose={closePalette} activeIndex={slashIndex} onActiveIndexChange={setSlashIndex} />}
+      <form id="composer" className={`composer ${voice.listening ? 'is-listening' : ''}`} onSubmit={send}>{queuedFiles.length > 0 && <AttachmentList attachments={queuedFiles} onRemove={sending ? undefined : removeFile} />}{uploading && <div className="upload-status" role="status"><span className="spinner" />Enviando anexos para o workspace…</div>}<textarea ref={composerRef} aria-label="Sua mensagem para o Luck" placeholder={sshDisconnected ? 'Conecte sua VPS para começar' : 'Pergunte ao Luck, anexe arquivos ou digite / para comandos…'} disabled={sshDisconnected || sending} value={draft} maxLength={16000} rows={2} onChange={e => setDraft(e.target.value)} onPaste={composerPaste} aria-expanded={Boolean(slashMatch)} aria-controls={slashMatch ? 'slash-command-menu' : undefined} aria-activedescendant={slashMatch && slashCommands.length ? `slash-command-${Math.min(slashIndex,slashCommands.length-1)}` : undefined} onKeyDown={composerKey} /><div className="composer-toolbar"><div className="composer-options"><button type="button" className="icon-button attach-button" aria-label="Anexar arquivos" title="Anexar imagens, PDF, ZIP e outros arquivos" disabled={sshDisconnected || sending} onClick={() => fileInputRef.current?.click()}><Icon name="attachment" size={19} /></button><button type="button" className="slash-toggle" aria-label="Abrir comandos" title="Comandos (/)" onClick={openPalette}>/</button><button type="button" className="icon-button composer-studio" aria-label="Abrir estúdio criativo" title="Estúdio criativo" onClick={() => openMedia()}><Icon name="image" size={18} /></button><div className="format-buttons"><button type="button" aria-label="Inserir negrito" title="Negrito (Ctrl+B)" disabled={sshDisconnected} onClick={() => formatDraft('**')}><b>B</b></button><button type="button" aria-label="Inserir itálico" title="Itálico (Ctrl+I)" disabled={sshDisconnected} onClick={() => formatDraft('_')}><i>I</i></button><button type="button" aria-label="Inserir código" title="Código" disabled={sshDisconnected} onClick={() => formatDraft('`', '`', 'código')}>‹/›</button></div><button type="button" className={`permission-chip ${permissions.sandbox === 'danger-full-access' ? 'is-full-access' : ''}`} onClick={() => setSettings(true)} disabled={Boolean(selected && !conversation)} title="Configurar permissões"><Icon name="shield" size={14} /><span>{permissionTitle(permissions)}</span><Icon name="down" size={12} /></button></div><div className="composer-actions">{draft.length > 14000 && <span className="char-count">{draft.length}/16000</span>}{voice.supportedSpeech && voice.speakingId && <button type="button" className="icon-button is-speaking" aria-label="Parar leitura" onClick={voice.stopSpeaking}><Icon name="stop" size={18} /></button>}<button type="button" className={`icon-button mic-button ${voice.listening ? 'active' : ''}`} aria-label={voice.listening ? 'Parar ditado' : 'Ditar mensagem'} aria-pressed={voice.listening} title={voice.supportedRecognition ? 'Ditar mensagem' : 'Ditado indisponível neste navegador'} disabled={sshDisconnected || sending} onClick={dictate}><Icon name={voice.listening ? 'stop' : 'mic'} size={19} /></button>{busy ? <button type="button" className="stop-button" onClick={interrupt} disabled={sending} aria-label="Interromper resposta"><Icon name="stop" size={16} /></button> : <button className="send-button" type="submit" disabled={sshDisconnected || (!draft.trim() && !queuedFiles.length) || sending || (selected !== null && !conversation)} aria-label="Enviar mensagem"><Icon name="arrow" size={21} /></button>}</div></div></form><p className="composer-note"><span>O Luck pode cometer erros. Revise informações e ações importantes.</span><span className="keyboard-hint">/ comandos · Enter enviar · Shift + Enter nova linha</span></p></div>
     </main>
-    {savedVpsDialog && <Modal title="Minha VPS" onClose={() => setSavedVpsDialog(false)} wide><SavedVps profile={status?.savedConnection} connected={status?.connected} occupied={status?.ownedByAnotherSession} pending={reconnectingVps || status?.reconnecting} forgetting={forgettingVps} error={status?.autoReconnectError || status?.savedConnectionError || status?.credentialSaveError} onReconnect={reconnectVps} onForget={forgetVps} onEdit={editVps} /></Modal>}
-    {terminalOpen && <Suspense fallback={<Modal title="Terminal do admin" onClose={() => setTerminalOpen(false)}><div className="conversation-loading"><span className="spinner" />Preparando terminal…</div></Modal>}><TerminalPanel csrf={session.csrfToken} onClose={() => setTerminalOpen(false)} onError={showError} onUnauthorized={showError} /></Suspense>}
+    {voiceOpen && <Modal title="Estúdio de voz" onClose={() => setVoiceOpen(false)} wide><Suspense fallback={<div className="conversation-loading" role="status"><span className="spinner" />Abrindo estúdio de voz…</div>}><VoiceStudio voice={voice} preferences={preferences} setPreferences={setPreferences} onDictate={dictate} disabled={sshDisconnected || sending} lastResponse={lastAssistant ? { id: lastAssistant.id, text: plainText(lastAssistant.text) } : null} /></Suspense></Modal>}
+    {mediaOpen && <Modal title="Estúdio criativo" onClose={() => setMediaOpen(false)} wide><Suspense fallback={<div className="conversation-loading" role="status"><span className="spinner" />Abrindo estúdio criativo…</div>}><MediaStudio initialMode={mediaMode} disabled={sshDisconnected || sending} onCompose={(prompt, meta) => { setComposeMode(['design','interface'].includes(meta.mode) ? 'design' : 'image'); setDraft(previous => `${prompt}${previous.trim() ? `\n\nContexto adicional:\n${previous}` : ''}`.slice(0,16000)); setMediaOpen(false); requestAnimationFrame(() => composerRef.current?.focus()); }} /></Suspense></Modal>}
+    {savedVpsDialog && <Modal title="Minha VPS" onClose={() => setSavedVpsDialog(false)} wide><SavedVps profile={status?.savedConnection} connected={status?.connected} occupied={status?.ownedByAnotherSession} pending={reconnectingVps || status?.reconnecting} forgetting={forgettingVps} error={status?.autoReconnectError || status?.savedConnectionError || status?.credentialSaveError} onReconnect={reconnectVps} onForget={forgetVps} onEdit={requestEditVps} /></Modal>}
+    {sshMode && status.connected && !terminalOpen && !projectsOpen && !projectTerminalRequest && !projectLogout && !projectConnectionAction && !sidebar && !settings && !deleteDialog && !info && !voiceOpen && !mediaOpen && !paletteOpen && !filesOpen && !savedVpsDialog && <TerminalLauncher onOpen={openTerminal} onPrepare={prepareTerminal} />}
+    {terminalMounted && <Suspense fallback={terminalOpen ? <Modal title="Terminal Pro" onClose={() => { setTerminalOpen(false); setTerminalMounted(false); }}><div className="conversation-loading"><span className="spinner" />Preparando terminal…</div></Modal> : null}><TerminalPanel key={`${session.csrfToken}-${terminalInstance}`} csrf={session.csrfToken} initialDirectory={terminalInitialDirectory} visible={terminalOpen} onClose={() => setTerminalOpen(false)} onExit={() => { setTerminalOpen(false); setTerminalMounted(false); }} onError={showError} onUnauthorized={showError} /></Suspense>}
+    {projectsMounted && <Suspense fallback={projectsOpen ? <Modal title="Área de projetos" onClose={() => setProjectsOpen(false)}><div className="conversation-loading"><span className="spinner" />Abrindo seus projetos…</div></Modal> : null}><ProjectWorkspace key={`${session.csrfToken}-${projectsScope?.signature || 'pending'}`} csrf={session.csrfToken} workspace={projectsScope?.workspace || status?.workspace} connected={Boolean(status?.connected && (!projectsScope || projectsScope.signature === projectEnvironment))} visible={projectsOpen} onClose={() => setProjectsOpen(false)} onError={showError} onTerminal={openProjectTerminal} onChat={useProjectInChat} onDirtyChange={setProjectsDirty} /></Suspense>}
+    {projectTerminalRequest && <Modal title="Abrir terminal do projeto?" onClose={() => { setProjectTerminalRequest(null); setProjectsOpen(true); }}><div className="project-terminal-confirm"><p>Uma nova sessão será aberta em <code>{projectTerminalRequest}</code>. Isso encerra o terminal manual atual e os processos ligados a ele.</p><div><button className="subtle-button" onClick={() => { setProjectTerminalRequest(null); setProjectsOpen(true); }}>Cancelar</button><button className="primary" onClick={() => launchProjectTerminal(projectTerminalRequest)}>Abrir nova sessão</button></div></div></Modal>}
+    {projectConnectionAction && <Modal title="Há arquivos sem salvar" onClose={() => setProjectConnectionAction(null)}><div className="project-terminal-confirm"><p>Salve as alterações da área de projetos antes de trocar ou desconectar a VPS.</p><div><button className="subtle-button" onClick={() => { setProjectConnectionAction(null); openProjects(); }}>Voltar aos projetos</button><button className="danger-button" onClick={discardAndChangeConnection}>Descartar e continuar</button></div></div></Modal>}
+    {projectLogout && <Modal title="Há arquivos sem salvar" onClose={() => setProjectLogout(false)}><div className="project-terminal-confirm"><p>Volte à área de projetos para salvar suas alterações antes de sair.</p><div><button className="subtle-button" onClick={() => { setProjectLogout(false); openProjects(); }}>Voltar aos projetos</button><button className="danger-button" onClick={() => { setProjectLogout(false); logout(); }}>Sair sem salvar</button></div></div></Modal>}
     {filesOpen && <FilesPanel csrf={session.csrfToken} conversationId={selected} onClose={() => setFilesOpen(false)} onError={showError} />}
     {info === 'model' && <Modal title="Modelo e desempenho" onClose={() => { if (!modelPending) setInfo(null); }} wide><ModelSettings key={selected || 'new'} capabilities={capabilities} loading={capabilitiesLoading} selection={modeSelection} busy={busy} pending={modelPending} onSave={savePerformance} /></Modal>}
-    {info && info !== 'model' && <AdminInfo kind={info} capabilities={capabilities} loading={capabilitiesLoading} status={status} conversation={modeSelection} permissions={permissions} onClose={() => setInfo(null)} onSkill={skill => { setInfo(null); setDraft(`$${skill.name} `); composerRef.current?.focus(); }} onCommand={runCommand} />}
+    {info && info !== 'model' && <AdminInfo kind={info} capabilities={capabilities} commands={commandCatalog} loading={capabilitiesLoading} status={status} conversation={modeSelection} permissions={permissions} onClose={() => setInfo(null)} onSkill={skill => { setInfo(null); setDraft(`$${skill.name} `); composerRef.current?.focus(); }} onCommand={runCommand} />}
     {settings && !deleteDialog && <Settings key={selected || 'new'} preferences={preferences} setPreferences={setPreferences} permissions={permissions} allowed={allowed} conversation={conversation} busy={busy} onSave={saveSettings} onDelete={() => requestDelete(conversation)} onClose={() => setSettings(false)} voice={voice} />}
     {deleteDialog && <Modal title="Excluir conversa?" onClose={() => { if (!deleting) setDeleteDialog(null); }}><div className="delete-content"><p>A conversa <strong>{deleteDialog.title}</strong> será removida do histórico do Luck. Esta ação não pode ser desfeita e não remove arquivos do workspace.</p>{deleteProblem && <p className="form-error" role="alert">{deleteProblem}</p>}<div className="settings-footer"><button className="subtle-button" disabled={deleting} onClick={() => setDeleteDialog(null)}>Cancelar</button><button className="danger-button" disabled={deleting || Boolean(conversations.find(item => item.id === deleteDialog.id)?.busy)} onClick={deleteConversation}>{deleting ? 'Excluindo…' : 'Excluir conversa'}</button></div></div></Modal>}
     <div className="sr-only" role="status" aria-live="polite">{copied ? 'Mensagem copiada.' : ''}</div>

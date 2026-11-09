@@ -26,6 +26,16 @@ export default function ModelSettings({ capabilities, loading, selection, busy, 
   const hasModel = capabilities?.models?.some(item => item.model === model || item.id === model);
   const effortSupported = !effort || efforts.some(item => item.reasoningEffort === effort);
   const tierSupported = !tier || tier === 'default' || tiers.some(item => item.id === tier);
+  const supported = efforts.map(item => item.reasoningEffort);
+  const balanced = supported.includes('medium') ? 'medium' : chosen?.defaultReasoningEffort || '';
+  const fastEffort = supported.includes('low') ? 'low' : balanced;
+  const fastTier = ['ultrafast', 'fast', 'priority'].find(id => tiers.some(item => item.id === id));
+  const deepest = ['ultra', 'max', 'xhigh', 'high'].find(id => supported.includes(id));
+  const presets = [
+    { id: 'balanced', icon: '◈', label: 'Equilibrado', description: 'Clareza e profundidade para o dia a dia.', effort: balanced, tier: 'default' },
+    ...(fastTier ? [{ id: 'fast', icon: 'ϟ', label: 'Rápido', description: 'Prioridade e agilidade nas respostas.', effort: fastEffort, tier: fastTier }] : []),
+    ...(deepest ? [{ id: 'deep', icon: '✧', label: deepest === 'ultra' ? 'Ultra' : 'Profundo', description: 'Mais raciocínio para os grandes desafios.', effort: deepest, tier: 'default' }] : []),
+  ];
   function changeModel(value) {
     const next = selectedModel(capabilities, value);
     setModel(value); setProblem('');
@@ -42,6 +52,7 @@ export default function ModelSettings({ capabilities, loading, selection, busy, 
   return <form className="performance-settings" onSubmit={submit}>
     <p className="section-description">Escolha o modelo, a profundidade do raciocínio e a velocidade para as próximas mensagens desta conversa.</p>
     {loading && <p className="admin-info-loading" role="status"><span className="spinner" />Consultando as opções do seu Codex…</p>}
+    {!loading && capabilities?.connected && <div className="performance-presets" aria-label="Perfis de desempenho">{presets.map(preset => <button key={preset.id} type="button" disabled={disabled} className={`${preset.id === 'deep' ? 'ultra-preset' : ''} ${effort === preset.effort && tier === preset.tier ? 'is-selected' : ''}`} aria-pressed={effort === preset.effort && tier === preset.tier} onClick={() => { setEffort(preset.effort); setTier(preset.tier); setProblem(''); }}><span className="preset-icon" aria-hidden="true">{preset.icon}</span><strong>{preset.label}</strong><small>{preset.description}</small></button>)}</div>}
     <fieldset disabled={disabled || loading || !capabilities?.connected}>
       <label className="field-label">Modelo do Codex<select value={model} onChange={event => changeModel(event.target.value)}>
         <option value="">Padrão do Codex{chosen && !model ? ` · ${chosen.displayName || chosen.model}` : ''}</option>

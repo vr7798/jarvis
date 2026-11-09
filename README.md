@@ -292,3 +292,13 @@ Se o SSH não conectar, confira host, porta, usuário, senha e impressão digita
 Em desenvolvimento, leia os logs da API iniciada por `npm run dev`; na publicação, use `pm2 logs jarvis`. Se o chat não atualizar pela internet, confira os ajustes de SSE do Nginx. O modo `mock` ajuda a separar problemas da interface de problemas do SSH/Codex.
 
 Faça backups privados de `api/data` e `api/.env`. Comandos, respostas, logs e credenciais do Codex podem conter informações privadas. A senha SSH não deve aparecer em logs ou capturas de tela.
+
+
+## Terminal com menor atraso
+
+A atualização de entrada contínua usa o serviço separado `jarvis-terminal-input`. Veja [instalação, funcionamento e recuperação](ATUALIZACAO-TERMINAL-VELOCIDADE.md).
+
+
+## Área de projetos v7
+
+Explore pastas da VPS, clone repositórios e edite arquivos em abas. Consulte [uso, salvamento e publicação da área de projetos](ATUALIZACAO-PROJETOS-V7.md).

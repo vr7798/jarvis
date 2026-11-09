@@ -2,6 +2,7 @@ import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState } 
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ImagePreview from './ImagePreview.jsx';
+import { downloadText } from './downloadText.js';
 
 function CodeBlock({ children }) {
   const code = Children.toArray(children).find(isValidElement);
@@ -19,8 +20,12 @@ function CodeBlock({ children }) {
     } catch { setFeedback('Não foi possível copiar'); }
     timeout.current = setTimeout(() => setFeedback(''), 2200);
   }
+  function download() {
+    const extensions = { javascript: 'js', typescript: 'ts', python: 'py', bash: 'sh', shell: 'sh', jsx: 'jsx', tsx: 'tsx', json: 'json', html: 'html', css: 'css', sql: 'sql', yaml: 'yaml', markdown: 'md', js: 'js', ts: 'ts', sh: 'sh', yml: 'yml' };
+    downloadText(text, `jarvis-codigo.${extensions[language.toLowerCase()] || 'txt'}`);
+  }
   return <div className="code-block">
-    <div className="code-header"><span>{language}</span><button type="button" onClick={copy} aria-label="Copiar código"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><span aria-live="polite">{feedback || 'Copiar código'}</span></button></div>
+    <div className="code-header"><span>{language}</span><div className="code-header-actions"><button type="button" onClick={download} aria-label="Baixar código"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" /></svg>Baixar</button><button type="button" onClick={copy} aria-label="Copiar código"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><span aria-live="polite">{feedback || 'Copiar código'}</span></button></div></div>
     <pre><code className={code?.props.className}>{text}</code></pre>
   </div>;
 }

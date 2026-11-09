@@ -1,0 +1,35 @@
+.terminal-launcher {
+  position: fixed;
+  right: 0;
+  top: 44%;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+  width: 32px;
+  min-height: 146px;
+  padding: 13px 5px;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: -3px 3px 18px #00000016;
+  touch-action: pan-y;
+  user-select: none;
+  transform: translateX(var(--terminal-pull, 0px));
+  transition: transform 160ms ease, background 160ms ease;
+}
+.terminal-launcher:hover { background: var(--surface-hover); }
+.terminal-launcher[data-dragging] { transition: none; }
+.terminal-launcher:focus-visible { outline-offset: -3px; }
+.terminal-launcher-grip { width: 12px; height: 3px; border-radius: 3px; background: currentColor; opacity: .4; }
+.terminal-launcher-icon { font: 600 12px ui-monospace, monospace; }
+.terminal-launcher-label { writing-mode: vertical-rl; font-size: 8px; font-weight: 650; letter-spacing: 1.5px; }
+.terminal-launcher-arrow { font: 20px/12px ui-monospace, monospace; }
+@media (max-width: 760px) {
+  .terminal-launcher { width: 27px; min-height: 134px; top: 38%; gap: 8px; }
+  .terminal-launcher-label { font-size: 7px; }
+}
+@media (prefers-reduced-motion: reduce) { .terminal-launcher { transition: none; } }
